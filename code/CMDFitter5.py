@@ -516,6 +516,8 @@ class CMDFitter():
 
 		lnP = np.sum(lnP_k)
 
+		self.lnP_k = lnP_k
+
 
 		if not(np.isfinite(lnP)):
 			with open(self.prefix+'.err', 'a') as f:
