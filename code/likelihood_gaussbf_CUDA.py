@@ -30,8 +30,16 @@ likelihood_functions = SourceModule("""
 #define ind_sigma_G 3
 #define ind_sigma_R 4
 
-texture<float, 2> DM, DMQ, SMQ, data;
+texture<float, 2> DMQ, SMQ;
 
+//
+// data should have 2 columns corresponding to colour and magnitude
+//
+// cov should be a [n,2,2] array, where n is the number of data points
+//
+texture<float, 2> data;
+texture<float, 2> cov;
+//texture<float, 3, cudaReadModeElementType> cov;
 
 extern "C" {
 
@@ -124,28 +132,15 @@ __device__ void parallel_logaddexp(double *A_local)
 }
 
 
-__device__ double bad_dist_prob(double gmr, double g){
-	double sig_gmr = 0.75;
-	double sig_g = 4.0;
-	double sig_gmr2 = sig_gmr*sig_gmr;
-	double sig_g2 = sig_g*sig_g;
-	double gmr_0 = 0.75;
-	double g_0 = 16.0;
-	double dgmr = gmr - gmr_0;
-	double dg0 = g - g_0;
-	return exp(-dgmr*dgmr/(2.0*sig_gmr2)) * exp(-dg0*dg0/(2.0*sig_g2)) / (2*M_PI*sig_gmr*sig_g);
-}
-
-
-__device__ double outlier_likelihood(double *Dk, double f_outlier){
+__device__ double outlier_likelihood(double *info, double *Dk, double f_outlier){
 	
 	double D0[2], D[2], S0[2][2], detS0, invS0[2][2];
 
-	D0[0] = 0.75;
-	D0[1] = 16.0;
+	D0[0] = info[0];
+	D0[1] = info[1];
 
-	S0[0][0] = 0.75*0.75;
-	S0[1][1] = 4.0*4.0;
+	S0[0][0] = info[2]*info[2];
+	S0[1][1] = info[3]*info[3];
 	S0[0][1] = 0.0;
 	S0[1][0] = 0.0;
 
@@ -162,56 +157,6 @@ __device__ double outlier_likelihood(double *Dk, double f_outlier){
     double DSD = D[0]*(invS0[0][0]*D[0] + invS0[0][1]*D[1]) + D[1]*(invS0[1][0]*D[0] + invS0[1][1]*D[1]);
 
     return -0.5*DSD - log(2.0*M_PI/f_outlier) - 0.5*log(detS0);
-
-}
-
-
-__device__ void single_likelihood_old(double h,double *Dk, double Sk[2][2], double *PM, double f_single, double *result){
-	
-	double D[2], detSk, invSk[2][2], DSD;
-
-
-	int nM = 8192;
-	double dM = 7.57575e-04;
-
-	__shared__ double lnp[THREADS_PER_BLOCK];
-
-    detSk = Sk[0][0]*Sk[1][1] - Sk[0][1]*Sk[0][1];
-
-    invSk[0][0] = Sk[1][1] / detSk;
-    invSk[1][1] = Sk[0][0] / detSk;
-    invSk[0][1] = -Sk[1][0] / detSk;
-    invSk[1][0] = -Sk[0][1] / detSk;
-
-    lnp[threadIdx.x] = -1.e50;
-
-    for (int i = threadIdx.x; i<nM; i+= blockDim.x){
-
-	    D[0] = Dk[0] - tex2D(DM,i,0);
-    	D[1] = Dk[1] - tex2D(DM,i,1);
-
-		DSD = D[0]*(invSk[0][0]*D[0] + invSk[0][1]*D[1]) + D[1]*(invSk[1][0]*D[0] + invSk[1][1]*D[1]);
-
-		lnp[threadIdx.x] = logaddexp(lnp[threadIdx.x],-DSD/(2*h*h) + log(PM[i]));
-
-		printf("i, D0, D1, DSD, lnp: %d %f %f %f %f\\n",i,D[0], D[1], DSD,lnp[threadIdx.x]);
-
-	}
-
-	__syncthreads();
-
-	parallel_logaddexp(lnp);
-
-	if (threadIdx.x == 0){
-
-		*result = lnp[0] - log(2.0*M_PI*h*h/(f_single*dM)) - 0.5*log(detSk);
-		printf("lnp0, lnorm, ldet, result: %f %f %f %f \\n",lnp[0],log(2.0*M_PI*h*h/(f_single*dM)),0.5*log(detSk),*result);
-
-	}
-
-	__syncthreads();
-
-	return;
 
 }
 
@@ -247,7 +192,10 @@ __device__ void single_likelihood(double h, double *Dk, double Sk[2][2], double 
 
 		lnp[threadIdx.x] = logaddexp(lnp[threadIdx.x],-0.5*DSD + log(PM[i]) - 0.5*log(detS));
 
-		//printf("i, D0, D1, DSD, lnp: %d %f %f %f %f %f %f\\n",i,D[0], D[1], DSD,PM[i],0.5*log(detS),lnp[threadIdx.x]);
+		//printf("i, Dk, DMQ, D0, Sk, DSD, lnp: %d %f  %f %f %f %f %f %f %f %f %f %f %f\\n",i,Dk[0],Dk[1],tex2D(DMQ,i,0),tex2D(DMQ,i,1),D[0], D[1], Sk[0][0], Sk[0][1],Sk[1][0],Sk[1][1],DSD, lnp[threadIdx.x]);
+		//printf("i, Dk, DMQ, D0, DSD, lnp: %d %f  %f %f %f %f %f %f %f\\n",i,Dk[0],Dk[1],tex2D(DMQ,i,0),tex2D(DMQ,i,1),D[0], D[1], DSD, lnp[threadIdx.x]);
+		//printf("i, DMQ: %d, %f %f \\n",i,tex2D(DMQ,i,0),tex2D(DMQ,i,1));
+		//printf("i, SMQ: %d %f %f \\n",i, tex2D(SMQ,i,0),tex2D(SMQ,i,1),tex2D(SMQ,i,2),tex2D(SMQ,i,3));
 
 
 	}
@@ -322,7 +270,7 @@ __device__ void binary_likelihood(double h, double *Dk, double Sk[2][2], double 
 
 
 
-__global__ void likelihood(double *PM_single, double *PMQ_binary, double h0, double h1, double f_outlier, double f_binary, double *lnp_k){
+__global__ void likelihood(double *PM_single, double *PMQ_binary, double *outlier_info, double h0, double h1, double h_magnitude_ref, double f_outlier, double f_binary, double *lnp_k){
 
 
 	int k = blockIdx.x;
@@ -331,28 +279,28 @@ __global__ void likelihood(double *PM_single, double *PMQ_binary, double h0, dou
 
 	double Sk[2][2], Dk[2];
 
-	double sigmaG2 = tex2D(data,k,ind_sigma_G)*tex2D(data,k,ind_sigma_G);
-	double sigmaR2 = tex2D(data,k,ind_sigma_R)*tex2D(data,k,ind_sigma_R);
+    Dk[0] = tex2D(data,k,0);
+    Dk[1] = tex2D(data,k,1);
 
-    Dk[0] = tex2D(data,k,ind_G) - tex2D(data,k,ind_R);
-    Dk[1] = tex2D(data,k,ind_G);
+    //Sk[0][0] = tex3D(cov,k,0,0);
+    //Sk[0][1] = tex3D(cov,k,0,1);
+    //Sk[1][0] = tex3D(cov,k,1,0);
+    //Sk[1][1] = tex3D(cov,k,1,1);
+    Sk[0][0] = tex2D(cov,k,0);
+    Sk[0][1] = tex2D(cov,k,1);
+    Sk[1][0] = tex2D(cov,k,2);
+    Sk[1][1] = tex2D(cov,k,3);
 
-    Sk[0][0] = sigmaG2 + sigmaR2;
-    Sk[0][1] = sigmaG2;
-    Sk[1][0] = sigmaG2;
-    Sk[1][1] = sigmaG2;
-
-	double h = h0 + h1*(tex2D(data,k,ind_G) - 13.0);
+	double h = h0 + h1*(Dk[1] - h_magnitude_ref);
 
 	double l_outlier = 0.0;
     if (threadIdx.x == 0) {
-	    l_outlier = outlier_likelihood(Dk, f_outlier);
+	    l_outlier = outlier_likelihood(outlier_info, Dk, f_outlier);
 	}
 
 	__syncthreads();
 
 	double l_single = 0.0;
-	//single_likelihood(h, Dk, Sk, PM_single, 1.0-f_outlier-f_binary,&l_single);
 	single_likelihood(h, Dk, Sk, PM_single, 1.0-f_outlier-f_binary, &l_single);
 
 	__syncthreads();
@@ -365,7 +313,13 @@ __global__ void likelihood(double *PM_single, double *PMQ_binary, double h0, dou
     if (threadIdx.x == 0) {
 		lnp_k[k] = logaddexp(l_outlier,l_single);
 		lnp_k[k] = logaddexp(lnp_k[k],l_binary);
-		//printf("k, lout, l_sin, l_bin: %d %f %f %f \\n",k,l_outlier,l_single,l_binary);
+		//printf("%d %f %f %f %f %f %f\\n",k,Dk[0],Dk[1],l_outlier,l_single,l_binary,lnp_k[k]);
+		//for (int m = 0; m < 10; m++) {
+		//   printf("%d %12.9f %12.9f %12.9f %12.9f\\n",m,tex2D(cov,m,0),tex2D(cov,m,1),tex2D(cov,m,2),tex2D(cov,m,3));
+		//}
+		//for (int m = 0; m < 10; m++) {
+		//   printf("%d %f %f %12.9f %12.9f %12.9f %12.9f\\n",m,tex2D(DMQ,m,0),tex2D(DMQ,m,1),tex2D(SMQ,m,0),tex2D(SMQ,m,1),tex2D(SMQ,m,2),tex2D(SMQ,m,3));
+		//}
 	}
 
  	__syncthreads();
