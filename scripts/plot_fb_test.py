@@ -14,8 +14,8 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__))+'/../code')
 
 from CMDFitter6 import Data, Isochrone, CMDFitter, PlotUtils
 
-data_description = {'file' : '../data/CMD_data.txt', \
-					'magnitude_min' : 14.5, \
+data_description = {'file' : 'data/CMD_data.txt', \
+					'magnitude_min' : 13.5, \
 					'magnitude_max' : 18.0, \
 					'column_mag' : 0, \
 					'column_blue' : 0, \
@@ -26,7 +26,7 @@ data_description = {'file' : '../data/CMD_data.txt', \
 					'colour_label' : 'G - R', \
 					'magnitude_label' : 'G'}
 
-iso_description = {'file' : '../data/MIST_iso_5GYr_06Fe.txt', \
+iso_description = {'file' : 'data/MIST_iso_5GYr_06Fe.txt', \
 					'magnitude_min' : 13.5, \
 					'magnitude_max' : 18.0, \
 					'column_mag' : 30, \
@@ -35,6 +35,18 @@ iso_description = {'file' : '../data/MIST_iso_5GYr_06Fe.txt', \
 					'column_mass' : 3, \
 					'magnitude_offset' : 9.55,
 					'colour_offset' : 0.012}
+
+
+def load(file):
+	extension = os.path.splitext(file)[1]
+	if extension == '.npy':
+		data = np.load(file)
+	else:
+		try:
+			data = np.loadtxt(file)
+		except ValueError:
+			data = np.loadtxt(file,skiprows=1)
+	return data
 
 
 data = Data(data_description)
@@ -47,8 +59,19 @@ fitter.freeze[6] = 1
 fitter.freeze[7] = 1
 fitter.freeze[8] = 1
 
-s = np.load('NS_test_samples.npy')
-w = np.load('NS_test_weights.npy')
+print(sys.argv)
+
+s = load(sys.argv[1])
+
+if len(sys.argv) == 4:
+	w = load(sys.argv[2])
+elif 'weighted' in sys.argv[1]:
+	w = s[:,0]
+	s = s[:,2:]
+else:
+	w = None
+
+print(s.shape,w.shape)
 
 #samples = np.zeros([s.shape[0],fitter.ndim])
 #samples[:,np.where(fitter.freeze==0)[0]] = s
@@ -59,7 +82,7 @@ PlotUtils.plot_q_distribution(fitter,s,w,ax=ax[0],save_figure=False)
 
 PlotUtils.plot_fb_q(fitter,s,w,ax=ax[1],save_figure=False)
 
-plt.savefig('q.png')
+plt.savefig(sys.argv[-1])
 
 
 
