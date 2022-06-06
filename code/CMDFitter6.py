@@ -47,6 +47,8 @@ class Data():
 
 		"""
 
+		print('data definition:',data_dict)
+
 		data = np.loadtxt(data_dict['file'])
 
 		self.magnitude = data[:,data_dict['column_mag']]
@@ -204,6 +206,8 @@ class Isochrone():
 
 		"""
 
+		print('isochrone definition:',isochrone_dict)
+
 		iso_data = np.loadtxt(isochrone_dict['file'])
 
 		# cut to exclude white dwarfs
@@ -337,7 +341,7 @@ class Isochrone():
 class PlotUtils():
 
 
-	def plot_q_distribution(fitter,samples,weights,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png'):
+	def plot_q_distribution(fitter,samples,weights=None,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png'):
 
 		"""Plot the implied binary mass-ratio distributiion function for n_plot_samples drawn randomly from samples."""
 
@@ -350,9 +354,12 @@ class PlotUtils():
 
 		ns = samples.shape[0]
 
+		if weights is not None:
+			weights = weights.tolist()
+
 		for i in range(n_plot_samples):
 			p = fitter.default_params.copy()
-			ind = random.choices(range(ns),k=1,weights=weights.tolist())
+			ind = random.choices(range(ns),k=1,weights=weights)
 			p[np.where(fitter.freeze == 0)] = samples[ind]
 			args = p[3:9].tolist()
 			args.append(fitter.M_ref)
@@ -370,7 +377,7 @@ class PlotUtils():
 		return ax
 
 
-	def plot_fb_q(fitter,samples,weights,ax=None,save_figure=True,plot_file='fb_q.png'):
+	def plot_fb_q(fitter,samples,weights=None,ax=None,save_figure=True,plot_file='fb_q.png'):
 
 		"""Using all samples, plot the implied binary mass-fraction for q' > q along with its 1- and 2-sigma uncertainty."""
 
@@ -396,12 +403,12 @@ class PlotUtils():
 
 			for i in range(len(samples)):
 
-			    p = samples[i]
-			    p[9] = 0.94
-			    y[i] = p[9] * ((1.0  - fitter.int_sl_0(q[j])) + \
-			                   p[3]*(0.0 - fitter.int_sl_1(q[j])) + \
-			                   p[4]*(0.0 - fitter.int_sl_2(q[j])) + \
-			                   p[5]*(0.0 - fitter.int_sl_3(q[j])) )
+				p = fitter.default_params
+				p[fitter.freeze == 0] = samples[i]
+				y[i] = p[9] * ((1.0  - fitter.int_sl_0(q[j])) + \
+						p[3]*(0.0 - fitter.int_sl_1(q[j])) + \
+						p[4]*(0.0 - fitter.int_sl_2(q[j])) + \
+						p[5]*(0.0 - fitter.int_sl_3(q[j])) )
 
 			wq  = DescrStatsW(data=y,weights=weights)
 			qq = wq.quantile(probs=np.array(0.01*np.array([50.0-sig2,50.0-sig1,50.0,50.0+sig1,50.0+sig2])),\

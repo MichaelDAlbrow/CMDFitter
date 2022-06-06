@@ -9,7 +9,7 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__))+'/../code')
 from CMDFitter6 import Data, Isochrone, CMDFitter
 
 data_description = {'file' : 'data/CMD_data.txt', \
-					'magnitude_min' : 14.5, \
+					'magnitude_min' : 13.5, \
 					'magnitude_max' : 18.0, \
 					'column_mag' : 0, \
 					'column_blue' : 0, \
@@ -21,7 +21,7 @@ data_description = {'file' : 'data/CMD_data.txt', \
 					'magnitude_label' : 'G'}
 
 iso_description = {'file' : 'data/MIST_iso_5GYr_06Fe.txt', \
-					'magnitude_min' : 14.5, \
+					'magnitude_min' : 13.5, \
 					'magnitude_max' : 18.0, \
 					'column_mag' : 30, \
 					'column_blue' : 30, \
@@ -41,6 +41,6 @@ fitter.freeze[6] = 1
 fitter.freeze[7] = 1
 fitter.freeze[8] = 1
 
-fitter.ultranest_sample(prefix='UN_test_')
+fitter.ultranest_sample(prefix='UN_test2_')
 
 
