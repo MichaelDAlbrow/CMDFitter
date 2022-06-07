@@ -1,0 +1,21 @@
+{
+"data_description" : {"file" : "data/CMD_data.txt",
+					"magnitude_min" : 13.5,
+					"magnitude_max" : 18.0,
+					"column_mag" : 0,
+					"column_blue" : 0,
+					"column_red" : 1,
+					"column_mag_err" : 3,
+					"column_blue_err" : 3,
+					"column_red_err" : 4,
+					"colour_label" : "G - R",
+					"magnitude_label" : "G"},
+"iso_description" : {"file" : "data/MIST_iso_5GYr_06Fe.txt",
+					"magnitude_min" : 13.5,
+					"column_mag" : 30,
+					"column_blue" : 30,
+					"column_red" : 32,
+					"column_mass" : 3, 
+					"magnitude_offset" : 9.55,
+					"colour_offset" : 0.012}
+}

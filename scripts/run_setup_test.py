@@ -5,35 +5,10 @@ import numpy as np
 sys.path.append(os.path.abspath(os.path.dirname(__file__))+'/../code')
 
 
-from CMDFitter6 import Data, Isochrone, CMDFitter
+from CMDFitter6 import CMDFitter
 
-data_description = {'file' : 'data/CMD_data.txt', \
-					'magnitude_min' : 13.5, \
-					'magnitude_max' : 18.0, \
-					'column_mag' : 0, \
-					'column_blue' : 0, \
-					'column_red' : 1, \
-					'column_mag_err' : 3, \
-					'column_blue_err' : 3, \
-					'column_red_err' : 4, \
-					'colour_label' : 'G - R', \
-					'magnitude_label' : 'G'}
+definition_file = sys.argv[1]
 
-iso_description = {'file' : 'data/MIST_iso_5GYr_06Fe.txt', \
-					'magnitude_min' : 13.5, \
-					'magnitude_max' : 18.0, \
-					'column_mag' : 30, \
-					'column_blue' : 30, \
-					'column_red' : 32, \
-					'column_mass' : 3, \
-					'magnitude_offset' : 9.55,
-					'colour_offset' : 0.012}
-
-
-data = Data(data_description)
-
-iso = Isochrone(iso_description, colour_correction_data=data)
-
-fitter = CMDFitter(data, iso)
+fitter = CMDFitter(definition_file)
 
 

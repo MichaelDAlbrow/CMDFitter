@@ -14,27 +14,7 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__))+'/../code')
 
 from CMDFitter6 import Data, Isochrone, CMDFitter, PlotUtils
 
-data_description = {'file' : 'data/CMD_data.txt', \
-					'magnitude_min' : 13.5, \
-					'magnitude_max' : 18.0, \
-					'column_mag' : 0, \
-					'column_blue' : 0, \
-					'column_red' : 1, \
-					'column_mag_err' : 3, \
-					'column_blue_err' : 3, \
-					'column_red_err' : 4, \
-					'colour_label' : 'G - R', \
-					'magnitude_label' : 'G'}
-
-iso_description = {'file' : 'data/MIST_iso_5GYr_06Fe.txt', \
-					'magnitude_min' : 13.5, \
-					'magnitude_max' : 18.0, \
-					'column_mag' : 30, \
-					'column_blue' : 30, \
-					'column_red' : 32, \
-					'column_mass' : 3, \
-					'magnitude_offset' : 9.55,
-					'colour_offset' : 0.012}
+definition_file = sys.argv[1]
 
 
 def load(file):
@@ -49,32 +29,23 @@ def load(file):
 	return data
 
 
-data = Data(data_description)
-
-iso = Isochrone(iso_description, colour_correction_data=data)
-
-fitter = CMDFitter(data, iso)
+fitter = CMDFitter(definition_file)
 
 fitter.freeze[6] = 1
 fitter.freeze[7] = 1
 fitter.freeze[8] = 1
 
-print(sys.argv)
 
-s = load(sys.argv[1])
+s = load(sys.argv[2])
 
-if len(sys.argv) == 4:
-	w = load(sys.argv[2])
-elif 'weighted' in sys.argv[1]:
+if len(sys.argv) == 5:
+	w = load(sys.argv[3])
+elif 'weighted' in sys.argv[2]:
 	w = s[:,0]
 	s = s[:,2:]
 else:
 	w = None
 
-print(s.shape,w.shape)
-
-#samples = np.zeros([s.shape[0],fitter.ndim])
-#samples[:,np.where(fitter.freeze==0)[0]] = s
 
 fig, ax = plt.subplots(2,1,figsize=(6,10))
 

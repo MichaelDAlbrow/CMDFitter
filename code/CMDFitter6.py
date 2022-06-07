@@ -8,7 +8,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pylab import subplots_adjust
 
-from time import time
+import json
 
 import pycuda.autoinit
 import pycuda.driver as drv
@@ -200,7 +200,6 @@ class Isochrone():
 										magnitude_offset: (float) add to isochrone magnitude to match data
 										colour_offset: (float) add to isochrone colour to match data
 										magnitude_min : (float) minimum magnitude for main sequence
-										magnitude_max : (float) maximum magnitude for main sequence
 
 			colour_correction_data:		(Data) Data instance used to correct isochrone colour
 
@@ -489,7 +488,7 @@ class PlotUtils():
 class CMDFitter():
 
 
-	def __init__(self,data=None,isochrone=None,trim_data=True,q_model='legendre'):
+	def __init__(self,json_file=None,data=None,isochrone=None,trim_data=True,q_model='legendre'):
 
 
 		"""
@@ -497,6 +496,8 @@ class CMDFitter():
 
 
 		Inputs:
+
+			json_file:		(string) the name of a json-format file with the data and isochrone defintions
 
 			data:			(Data) input CMD data instance
 
@@ -552,10 +553,29 @@ class CMDFitter():
 		self.int_sl_2 = lambda x: 2.0*x**3 - 3.0*x**2 + x
 		self.int_sl_3 = lambda x: 5.0*x**4 - 10.0*x**3 + 6.0*x**2 - x
 
-		if data is None or isochrone is None:
+		self.neginf = -np.inf
+
+
+		# Exit now if no input provided
+		if json_file is None and (data is None or isochrone is None):
 			return
 
-		self.neginf = -np.inf
+		# Setup from json-format description file
+		if json_file is not None:
+
+			with open(json_file) as file:
+				data = json.load(file)
+			
+			data_description = data['data_description']
+			iso_description = data['iso_description']
+			
+			data = Data(data_description)
+			isochrone = Isochrone(iso_description, colour_correction_data=data)
+
+		else:
+
+			assert isinstance(data, Data)
+			assert isinstance(isochrone, Isochrone)
 
 		self.data = data
 
