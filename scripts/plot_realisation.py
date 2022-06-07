@@ -9,48 +9,23 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.abspath(os.path.dirname(__file__))+'/../code')
 
 
-from CMDFitter6 import Data, Isochrone, CMDFitter, PlotUtils
+from CMDFitter6 import CMDFitter, PlotUtils
 
-data_description = {'file' : 'data/CMD_data.txt', \
-                    'magnitude_min' : 14.5, \
-                    'magnitude_max' : 18.0, \
-                    'column_mag' : 0, \
-                    'column_blue' : 0, \
-                    'column_red' : 1, \
-                    'column_mag_err' : 3, \
-                    'column_blue_err' : 3, \
-                    'column_red_err' : 4, \
-                    'colour_label' : 'G - R', \
-                    'magnitude_label' : 'G'}
+definition_file = sys.argv[1]
 
-iso_description = {'file' : 'data/MIST_iso_5GYr_06Fe.txt', \
-                    'magnitude_min' : 14.5, \
-                    'magnitude_max' : 18.0, \
-                    'column_mag' : 30, \
-                    'column_blue' : 30, \
-                    'column_red' : 32, \
-                    'column_mass' : 3, \
-                    'magnitude_offset' : 9.55,
-                    'colour_offset' : 0.012}
-
-
-data = Data(data_description)
-
-iso = Isochrone(iso_description, colour_correction_data=data)
-
-fitter = CMDFitter(data, iso)
+fitter = CMDFitter(definition_file)
 
 fitter.freeze[6] = 1
 fitter.freeze[7] = 1
 fitter.freeze[8] = 1
 
-s = np.load('opt_l_fr.npy')
+s = np.load(sys.argv[2])
 
 params = fitter.default_params
 
 params[fitter.freeze==0] = s
 
-PlotUtils.plot_realisation(fitter,params)
+PlotUtils.plot_realisation(fitter,params,plot_file=sys.argv[3])
 
 
 
