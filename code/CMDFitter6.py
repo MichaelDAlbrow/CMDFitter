@@ -131,8 +131,20 @@ class Data():
 		B_min_mag, B_min_colour = isochrone.binary(M_min,q)
 		B_max_mag, B_max_colour = isochrone.binary(M_max,q)
 
-		B_min_interp = PchipInterpolator(np.flip(B_min_mag),np.flip(B_min_colour))
-		B_max_interp = PchipInterpolator(np.flip(B_max_mag),np.flip(B_max_colour))
+		k_min = 0
+		k_max = 0
+
+		k_min_flag = B_min_mag[1:]-B_min_mag[:-1] > 0
+		k_max_flag = B_max_mag[1:]-B_max_mag[:-1] > 0
+
+		if k_min_flag.any():
+			k_min = np.where(k_min_flag)[0][-1] + 1
+
+		if k_max_flag.any():
+			k_max = np.where(k_max_flag)[0][-1] + 1
+
+		B_min_interp = PchipInterpolator(np.flip(B_min_mag[k_min:]),np.flip(B_min_colour[k_min:]))
+		B_max_interp = PchipInterpolator(np.flip(B_max_mag[k_max:]),np.flip(B_max_colour[k_max:]))
 
 		good_points = np.where( ( (self.magnitude > self.magnitude_min) & (self.magnitude < self.magnitude_max - 0.75) ) | \
 								( (self.magnitude > self.magnitude_min - 0.75) & \
@@ -145,7 +157,7 @@ class Data():
 
 			plt.figure(figsize=(4.5,6))
 			ax = plt.axes()
-			ax.scatter(self.colour,self.magnitude,c='k',s=0.2)
+			ax.scatter(self.colour,self.magnitude,c='k',s=0.2,alpha=0.6,marker='.')
 
 
 		self.magnitude = self.magnitude[good_points]
@@ -153,7 +165,11 @@ class Data():
 		self.cov = self.cov[good_points]
 
 		data_iso_mag = isochrone.colour_mag_interp(self.colour)
-		good_points = np.where( (self.magnitude - data_iso_mag > -0.9) & (self.magnitude - data_iso_mag < 0.15) )
+		#good_points = np.where( (self.magnitude - data_iso_mag > -0.9) & (self.magnitude - data_iso_mag < 0.15) )[0]
+		good_points = np.where( (self.magnitude - data_iso_mag > -1.3) & (self.magnitude - data_iso_mag < 0.55) )[0]
+
+		#for i in range(len(self.magnitude)):
+		#	print(i,self.magnitude[i],self.colour[i],data_iso_mag[i],(self.magnitude[i] - data_iso_mag[i] > -1.3) & (self.magnitude[i] - data_iso_mag[i] < 0.55))
 
 		self.magnitude = self.magnitude[good_points]
 		self.colour = self.colour[good_points]
@@ -161,14 +177,18 @@ class Data():
 
 		if plot:
 
-			ax.scatter(self.colour,self.magnitude,c='b',s=0.2)
+			ax.scatter(self.colour,self.magnitude,c='b',s=0.2,marker='.')
 
 			xmag = np.linspace(self.magnitude_min,self.magnitude_max,1001)
-			ax.plot(isochrone.mag_colour_interp(xmag),xmag,'r--',alpha=0.4)
+			ax.plot(isochrone.mag_colour_interp(xmag),xmag,'r--',alpha=1.0)
+
+			#ymag = np.linspace(0.5,0.9,1001)
+			#ax.plot(ymag,isochrone.colour_mag_interp(ymag),'m--',alpha=1.0)
 
 			ax.set_xlabel(self.colour_label)
 			ax.set_ylabel(self.magnitude_label)
 			ax.set_ylim([self.magnitude_max+1,self.magnitude_min-1])
+			ax.set_xlim([np.min(isochrone.mag_colour_interp(xmag))-0.25,np.max(isochrone.mag_colour_interp(xmag))+0.5])
 			plt.savefig(plot_file)
 
 
@@ -200,6 +220,7 @@ class Isochrone():
 										magnitude_offset: (float) add to isochrone magnitude to match data
 										colour_offset: (float) add to isochrone colour to match data
 										magnitude_min : (float) minimum magnitude for main sequence
+										magnitude_max : (float) maximum magnitude for main sequence
 
 			colour_correction_data:		(Data) Data instance used to correct isochrone colour
 
@@ -230,7 +251,7 @@ class Isochrone():
 		iso_blue = iso_data[:,isochrone_dict['column_blue']]
 		iso_M = iso_data[:,isochrone_dict['column_mass']]
 
-		pts = np.where(self.magnitude > isochrone_dict['magnitude_min'])[0]
+		pts = np.where((self.magnitude > isochrone_dict['magnitude_min']) & (self.magnitude < isochrone_dict['magnitude_max']))[0]
 
 		ind = np.argsort(self.magnitude[pts])
 		self.mag_M_interp = PchipInterpolator(self.magnitude[pts][ind],iso_M[pts][ind])
@@ -271,9 +292,8 @@ class Isochrone():
 
 			# Construct a histogram and find the maximum of a parabola that passes through the maximum and the point on each side.
 
-			delta_min_max = (np.min(data_delta[pts]),np.max(data_delta[pts]))
-			delta_range = delta_min_max[1] - delta_min_max[0]
-			bin_edges = np.linspace(delta_min_max[0]-0.2*delta_range,delta_min_max[1]+0.2*delta_range,51)
+			med_delta = np.median(data_delta[pts])
+			bin_edges = np.linspace(med_delta-0.1,med_delta+0.1,21)
 			h, h_edges = np.histogram(data_delta[pts],bins=bin_edges)
 			j = np.argmax(h)
 			htop = h[j-1:j+2]
@@ -290,11 +310,12 @@ class Isochrone():
 			ax = plt.axes()
 			ax.scatter(data.colour,data.magnitude,marker='.',c='k',s=0.2)
 			xmag = np.linspace(data.magnitude_min,data.magnitude_max,1001)
-			ax.plot(iso_colour_interp(xmag),xmag,'b--',alpha=0.4)
-			ax.plot(iso_colour_interp(xmag)+delta_interp(xmag),xmag,'r-',alpha=0.4)
+			ax.plot(iso_colour_interp(xmag),xmag,'b--',alpha=0.7)
+			ax.plot(iso_colour_interp(xmag)+delta_interp(xmag),xmag,'r-',alpha=0.7)
 			ax.set_xlabel(data.colour_label)
 			ax.set_ylabel(data.magnitude_label)
 			ax.set_ylim([data.magnitude_max+1,data.magnitude_min-1])
+			ax.set_xlim([np.min(iso_colour_interp(xmag))-0.25,np.max(iso_colour_interp(xmag)+delta_interp(xmag))+0.5])
 			plt.savefig(plot_file)
 
 		return delta_interp
@@ -1275,9 +1296,10 @@ class CMDFitter():
 		plt.savefig(prefix+'corner.png')
 
 
-	def ultranest_sample(self,prefix='un_'):
+	def ultranest_sample(self,prefix='un_',stepsampler=False):
 
 		import ultranest
+		import ultranest.stepsampler
 
 		self.neginf = sys.float_info.min
 
@@ -1289,7 +1311,13 @@ class CMDFitter():
 
 		sampler = ultranest.ReactiveNestedSampler(labels, self.lnlikelihood, self.prior_transform,log_dir=output_dir,resume='overwrite')
 
-		result = sampler.run()
+		if stepsampler:
+
+			nsteps = 5*(len(self.freeze) - sum(self.freeze))
+			sampler.stepsampler = ultranest.stepsampler.SliceSampler(nsteps=nsteps,generate_direction=ultranest.stepsampler.generate_mixture_random_direction)
+
+
+		result = sampler.run(min_num_live_points=400)
 
 		sampler.print_results()
 
