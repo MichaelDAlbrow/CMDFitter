@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 from scipy.interpolate import PchipInterpolator
-from scipy.optimize import minimize
+from scipy.optimize import minimize, nnls
 
 import matplotlib
 matplotlib.use("Agg")
@@ -107,9 +107,6 @@ class Data():
 		#self.cov_CUDA.set_array(texarray)
 		self.cov_CUDA.set_filter_mode(drv.filter_mode.POINT)
 
-		#for i in range(10):
-		#	print(i,self.cov[i])
-
 		col_mag = np.vstack((self.colour,self.magnitude))
 
 		self.col_mag_CUDA = likelihood_functions.get_texref("data")
@@ -165,11 +162,7 @@ class Data():
 		self.cov = self.cov[good_points]
 
 		data_iso_mag = isochrone.colour_mag_interp(self.colour)
-		#good_points = np.where( (self.magnitude - data_iso_mag > -0.9) & (self.magnitude - data_iso_mag < 0.15) )[0]
 		good_points = np.where( (self.magnitude - data_iso_mag > -1.3) & (self.magnitude - data_iso_mag < 0.55) )[0]
-
-		#for i in range(len(self.magnitude)):
-		#	print(i,self.magnitude[i],self.colour[i],data_iso_mag[i],(self.magnitude[i] - data_iso_mag[i] > -1.3) & (self.magnitude[i] - data_iso_mag[i] < 0.55))
 
 		self.magnitude = self.magnitude[good_points]
 		self.colour = self.colour[good_points]
@@ -181,9 +174,6 @@ class Data():
 
 			xmag = np.linspace(self.magnitude_min,self.magnitude_max,1001)
 			ax.plot(isochrone.mag_colour_interp(xmag),xmag,'r--',alpha=1.0)
-
-			#ymag = np.linspace(0.5,0.9,1001)
-			#ax.plot(ymag,isochrone.colour_mag_interp(ymag),'m--',alpha=1.0)
 
 			ax.set_xlabel(self.colour_label)
 			ax.set_ylabel(self.magnitude_label)
@@ -629,7 +619,7 @@ class CMDFitter():
 		self.qw = 0.012
 		self.q0 = np.linspace(self.qw*2,1,self.n_bf)
 
-		self.qsigma = 0.01
+		self.qsigma = 0.0001
 		self.qx = np.linspace(0.001,1,200)
 		self.qbf = np.zeros([self.n_bf,200])
 		for i in range(self.n_bf):
@@ -640,7 +630,10 @@ class CMDFitter():
 			for j in range(self.n_bf):
 				self.qA[k,j] = np.sum(self.qbf[k,:]*self.qbf[j,:]/self.qsigma**2) 
 
-		self.Msigma = 0.01
+		self.qAT = self.qA.T
+		self.qAA = np.dot(self.qAT,self.qA)
+
+		self.Msigma = 0.0001
 		self.Mx = np.linspace(0.1,1.1,200)
 
 		self.Mbf = np.zeros([self.n_bf,200])
@@ -651,6 +644,9 @@ class CMDFitter():
 		for k in range(self.n_bf):
 			for j in range(self.n_bf):
 				self.MA[k,j] = np.sum(self.Mbf[k,:]*self.Mbf[j,:]/self.Msigma**2) 
+
+		self.MAT = self.MA.T
+		self.MAA = np.dot(self.MAT,self.MA)
 
 		D_ij = np.zeros([self.n_bf**2,2])
 		S_ij = np.zeros([self.n_bf**2,2,2])
@@ -706,10 +702,10 @@ class CMDFitter():
 
 		"""Return a function that maps the range (0,1) onto the mass function.""" 
 
-		k = 10.0**log_k
 		m = np.linspace(0.1,maxM,1000)
-		dm = m[1]-m[0]
-		y = m**(-gamma) / (1.0 + np.exp(-k*(m-x0)))
+
+		y = self.M_distribution(m,log_k,x0,gamma,maxM)
+
 		y_cumulative = np.cumsum(y)/np.sum(y)
 		pts = np.where(y_cumulative>1.e-50)[0]
 		return PchipInterpolator(y_cumulative[pts],m[pts])
@@ -739,19 +735,10 @@ class CMDFitter():
 		assert self.q_model in ['power','legendre']
 
 		q = np.linspace(0,1,1001)
-		dq = q[1]-q[0]
 
-		if self.q_model == 'power':
-			beta,alpha,B,M = params
-			power = alpha + beta*(M-self.M_ref)
-			y = (alpha + beta*(M-self.M_ref) + 1.0)*(1.0-B)*q**power + B
+		y = self.q_distribution(q,params)			
 
-		if self.q_model == 'legendre':
-			a1, a2, a3, a1_dot, a2_dot,a3_dot, M = params
-			dM = M-self.M_ref
-			y = self.sl_0(q) + (a1+a1_dot*dM)*self.sl_1(q) + (a2+a2_dot*dM)*self.sl_2(q) + (a3+a3_dot*dM)*self.sl_3(q)
-			
-		y_cumulative = np.cumsum(y)
+		y_cumulative = np.cumsum(y)+np.arange(len(y))*1.e-6
 
 		return PchipInterpolator(y_cumulative/y_cumulative[-1],q)
 
@@ -855,7 +842,8 @@ class CMDFitter():
 
 	def norm(self,x,A,b):
 
-		return np.linalg.norm(np.dot(A,x)-b)
+		return np.linalg.norm(self.num_lib.dot(A,x)-b)
+
 
 
 	def M_gauss(self,Mparams):
@@ -870,13 +858,7 @@ class CMDFitter():
 		for k in range(self.n_bf):
 			Mb[k] = np.sum(My*self.Mbf[k,:]/self.Msigma**2)
 		
-		Ma = np.linalg.solve(self.MA,Mb)
-
-		Ma[self.M0 < (M0 - 4.0/k)] = 0.0
-
-		if np.min(Ma) < 0:
-			result = minimize(self.norm, np.zeros(self.n_bf), args=(self.MA,Mb), method='L-BFGS-B', bounds=[(0.,None) for x in range(self.n_bf)])
-			Ma = result.x
+		Ma, resid = nnls(self.MA,Mb)
 
 		norm_c = np.sum(Ma)
 
@@ -893,11 +875,7 @@ class CMDFitter():
 		for k in range(self.n_bf):
 			qb[k] = np.sum(qy*self.qbf[k,:]/self.qsigma**2)
 		
-		qa = np.linalg.solve(self.qA,qb)
-
-		if np.min(qa) < 0:
-			result = minimize(self.norm, np.zeros(self.n_bf), args=(self.qA,qb), method='L-BFGS-B', bounds=[(0.,None) for x in range(self.n_bf)])
-			qa = result.x
+		qa, resid = nnls(self.qA,qb)
 
 		norm_c = np.sum(qa)
 
@@ -957,7 +935,7 @@ class CMDFitter():
 			log_k, M0, gamma, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb, fo, h0, h1 = p
 
 			# Check that the parameters generate a positive q distribution for all masses
-			for MM in np.linspace(self.mass_slice[0],self.mass_slice[1],11).tolist():
+			for MM in np.linspace(self.mass_slice[0],self.mass_slice[1],101).tolist():
 				args = p[3:9].tolist()
 				args.append(MM)
 				q_dist_test = self.q_distribution(np.linspace(0.0,1.0,1001),args)
