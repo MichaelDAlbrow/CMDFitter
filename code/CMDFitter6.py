@@ -538,7 +538,7 @@ class CMDFitter():
 			self.ndim = 13
 			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$a_1$", r"$a_2$", r"$a_3$", \
 						r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$",r"$f_B$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.2,0.55,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.5,0.01,1.0,0.00])
+			self.default_params = np.array([2.4,0.55,0.006,1.0,0.3,0.2,0.008,0.008,0.0009,0.35,0.001,1.2,0.1])
 
 		self.freeze = np.zeros(self.ndim)
 		self.prefix = 'out_'
@@ -935,10 +935,10 @@ class CMDFitter():
 			log_k, M0, gamma, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb, fo, h0, h1 = p
 
 			# Check that the parameters generate a positive q distribution for all masses
-			for MM in np.linspace(self.mass_slice[0],self.mass_slice[1],101).tolist():
+			for MM in np.linspace(self.mass_slice[0],self.mass_slice[1],31).tolist():
 				args = p[3:9].tolist()
 				args.append(MM)
-				q_dist_test = self.q_distribution(np.linspace(0.0,1.0,1001),args)
+				q_dist_test = self.q_distribution(np.linspace(0.0,1.0,101),args)
 				if np.min(q_dist_test) < 0.0:
 					return self.neginf
 
