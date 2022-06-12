@@ -120,6 +120,8 @@ class Data():
 
 		"""Apply some cuts to the data, based on the isochrone."""
 
+		assert isinstance(isochrone,Isochrone)
+
 		q = np.linspace(0.1,1,11)
 
 		M_min = isochrone.mag_M_interp(self.magnitude_min)
@@ -172,8 +174,18 @@ class Data():
 
 			ax.scatter(self.colour,self.magnitude,c='b',s=0.2,marker='.')
 
-			xmag = np.linspace(self.magnitude_min,self.magnitude_max,1001)
-			ax.plot(isochrone.mag_colour_interp(xmag),xmag,'r--',alpha=1.0)
+			xmag = np.linspace(self.magnitude_min-0.5,self.magnitude_max+0.5,1001)
+			ax.plot(isochrone.mag_colour_interp(xmag),xmag,'r-',alpha=1.0)
+
+			ax.plot(isochrone.colour,isochrone.magnitude,'b--',alpha=1.0)
+
+			xmag = np.linspace(self.magnitude_min+0.5,self.magnitude_max+0.5,1001)
+			ax.plot(isochrone.mag_colour_interp(xmag),xmag - 1.30,'c-',alpha=1.0)
+			xmag = np.linspace(self.magnitude_min-0.55,self.magnitude_max-0.55,1001)
+			ax.plot(isochrone.mag_colour_interp(xmag),xmag + 0.55,'c-',alpha=1.0)
+
+			ax.plot(B_min_colour,B_min_mag,'c-')
+			ax.plot(B_max_colour,B_max_mag,'c-')
 
 			ax.set_xlabel(self.colour_label)
 			ax.set_ylabel(self.magnitude_label)
@@ -357,6 +369,10 @@ class PlotUtils():
 
 		import random
 
+		assert isinstance(fitter,CMDFitter)
+
+		assert fitter.q_model == 'legendre'
+
 		if ax is None:
 			ax = plt.axes()
 
@@ -387,11 +403,51 @@ class PlotUtils():
 		return ax
 
 
+	def plot_prior_q_distribution(fitter,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png'):
+
+		"""Plot the implied binary mass-ratio distributiion function for n_plot_samples drawn randomly from samples."""
+
+		import random
+
+		assert isinstance(fitter,CMDFitter)
+
+		assert fitter.q_model == 'legendre'
+
+		if ax is None:
+			ax = plt.axes()
+
+		q = np.linspace(0,1,101)
+
+
+		for i in range(n_plot_samples):
+
+			x = np.random.rand(13)
+			p = fitter.prior_transform(x)
+			args = p[3:9].tolist()
+			args.append(fitter.M_ref)
+			ax.plot(q,fitter.q_distribution(q,args),'b-',alpha=0.01)
+
+		ax.set_ylim((0,4))
+		ax.set_xlim((0,1))
+
+		ax.set_xlabel(r'$q$')
+		ax.set_ylabel(r'$P(q)$')
+
+		if save_figure:
+			plt.savefig(plot_file)
+
+		return ax
+
+
 	def plot_fb_q(fitter,samples,weights=None,ax=None,save_figure=True,plot_file='fb_q.png'):
 
 		"""Using all samples, plot the implied binary mass-fraction for q' > q along with its 1- and 2-sigma uncertainty."""
 
 		from statsmodels.stats.weightstats import DescrStatsW
+
+		assert isinstance(fitter, CMDFitter)
+
+		assert fitter.q_model == 'legendre'
 
 		if ax is None:
 			ax = plt.axes()
@@ -450,9 +506,80 @@ class PlotUtils():
 		return ax
 
 
+	def plot_prior_fb_q(fitter,n_samples=1000,ax=None,save_figure=True,plot_file='fb_q.png'):
+
+		"""Using all samples, plot the implied binary mass-fraction for q' > q along with its 1- and 2-sigma uncertainty."""
+
+		from statsmodels.stats.weightstats import DescrStatsW
+
+		assert isinstance(fitter, CMDFitter)
+
+		assert fitter.q_model == 'legendre'
+
+		if ax is None:
+			ax = plt.axes()
+
+		q = np.linspace(0,1,101)
+
+		sig1 = 0.5 * 68.27
+		sig2 = 0.5 * 95.45
+
+		yq1 = np.zeros(101)
+		yq2 = np.zeros(101)
+		yq3 = np.zeros(101)
+		yq4 = np.zeros(101)
+		yq5 = np.zeros(101)
+
+		x = np.random.rand(n_samples,13)
+
+		y = np.zeros(n_samples)
+
+		for j in range(101):
+
+			for i in range(n_samples):
+		
+				p = fitter.prior_transform(x[i])
+
+				y[i] = p[9] * ((1.0  - fitter.int_sl_0(q[j])) + \
+						p[3]*(0.0 - fitter.int_sl_1(q[j])) + \
+						p[4]*(0.0 - fitter.int_sl_2(q[j])) + \
+						p[5]*(0.0 - fitter.int_sl_3(q[j])) )
+
+			wq  = DescrStatsW(data=y)
+			qq = wq.quantile(probs=np.array(0.01*np.array([50.0-sig2,50.0-sig1,50.0,50.0+sig1,50.0+sig2])),\
+			            return_pandas=False)
+
+			yq1[j] = qq[0]
+			yq2[j] = qq[1]
+			yq3[j] = qq[2]
+			yq4[j] = qq[3]
+			yq5[j] = qq[4]
+
+		ax.fill_between(q,y1=yq1,y2=yq5,color='b',alpha=0.1)
+		ax.fill_between(q,y1=yq2,y2=yq4,color='b',alpha=0.4)
+
+		ax.plot(q,yq3,'r-')
+
+		ax.set_xlabel(r'$q$')
+		ax.set_ylabel(r"$f_B \, (q'>q)$")
+
+		ax.set_xlim((0,1))
+		ax.set_ylim((0,1.0))
+
+		ax.tick_params(axis='y',which='both',direction='in',right=True)
+		ax.tick_params(axis='x',which='both',direction='in',top=True)
+
+		if save_figure:
+			plt.savefig(plot_file)
+
+		return ax
+
+
 	def plot_realisation(fitter,params,plot_file='realisation.png'):
 
 		"""Plot the data CMD and 3 comparative random realisations of the model implied by params."""
+
+		assert isinstance(fitter, CMDFitter)
 
 		n = len(fitter.data.magnitude)
 
@@ -503,7 +630,7 @@ class CMDFitter():
 
 
 		"""
-		Set up a CMDFitter instance.
+		Set up a CMDFitter instance. This can be defined by providing a json-format definition file, or separate Data and Isochrone objects.
 
 
 		Inputs:
@@ -517,8 +644,6 @@ class CMDFitter():
 			trim_data:		(boolean) data will be filtered if true
 
 			q_model:		(string) functional form for q distribution. Must be "power" or "legendre".
-
-			scale_data_errors:	(float) or (None). Scale data uncertinties by this amount during set up.
 
 		"""
 
@@ -538,7 +663,7 @@ class CMDFitter():
 			self.ndim = 13
 			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$a_1$", r"$a_2$", r"$a_3$", \
 						r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$",r"$f_B$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.4,0.55,0.006,1.0,0.3,0.2,0.008,0.008,0.0009,0.35,0.001,1.2,0.1])
+			self.default_params = np.array([2.4,0.55,0.006, 0.0,0.0,0.0, 0.0,0.0,0.0, 0.35,0.001, 1.0,0.0])
 
 		self.freeze = np.zeros(self.ndim)
 		self.prefix = 'out_'
@@ -663,7 +788,7 @@ class CMDFitter():
 		S_ij_shaped = S_ij.reshape(self.n_bf**2,4)
 
 
-		# upload basis functions to GPU
+		# upload basis functions to GPU texture memory
 
 		self.DMQ_CUDA = likelihood_functions.get_texref("DMQ")
 		drv.matrix_to_texref(np.float32(D_ij),self.DMQ_CUDA,order='F')
@@ -838,11 +963,6 @@ class CMDFitter():
 		jacob[1,1] = mag_q(q,1)
 
 		return jacob
-
-
-	def norm(self,x,A,b):
-
-		return np.linalg.norm(self.num_lib.dot(A,x)-b)
 
 
 
