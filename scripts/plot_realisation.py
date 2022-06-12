@@ -21,7 +21,7 @@ fitter.freeze[8] = 1
 
 s = np.load(sys.argv[2])
 
-params = fitter.default_params
+params = fitter.default_params.copy()
 
 params[fitter.freeze==0] = s
 

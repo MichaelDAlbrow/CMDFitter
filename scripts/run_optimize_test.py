@@ -16,7 +16,7 @@ fitter.freeze[6] = 1
 fitter.freeze[7] = 1
 fitter.freeze[8] = 1
 
-params = fitter.default_params
+params = fitter.default_params.copy()
 
 p = params[fitter.freeze==0]
 

@@ -16,7 +16,7 @@ fitter.freeze[6] = 1
 fitter.freeze[7] = 1
 fitter.freeze[8] = 1
 
-p = fitter.default_params
+p = fitter.default_params.copy()
 
 fitter.emcee_sample(p,prefix='EM_test_')
 
