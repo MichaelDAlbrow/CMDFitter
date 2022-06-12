@@ -469,7 +469,7 @@ class PlotUtils():
 
 			for i in range(len(samples)):
 
-				p = fitter.default_params
+				p = fitter.default_params.copy()
 				p[fitter.freeze == 0] = samples[i]
 				y[i] = p[9] * ((1.0  - fitter.int_sl_0(q[j])) + \
 						p[3]*(0.0 - fitter.int_sl_1(q[j])) + \
@@ -1041,7 +1041,7 @@ class CMDFitter():
 
 		"""Call the external CUDA function to evaluate the likelihood function."""
 		
-		p = self.default_params
+		p = self.default_params.copy()
 		p[self.freeze==0] = params
 
 		assert self.q_model in ['power','legendre']
@@ -1098,7 +1098,7 @@ class CMDFitter():
 
 		from scipy.stats import norm, truncnorm
 
-		p = self.default_params
+		p = self.default_params.copy()
 		p[self.freeze==0] = params
 
 		assert self.q_model in ['power','legendre']
@@ -1141,7 +1141,7 @@ class CMDFitter():
 
 		assert self.q_model in ['power','legendre']
 
-		x = self.default_params
+		x = self.default_params.copy()
 
 		if self.q_model == 'power':
 
