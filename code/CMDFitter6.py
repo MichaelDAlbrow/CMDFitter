@@ -3,6 +3,7 @@ import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.optimize import minimize, nnls
 
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -116,7 +117,7 @@ class Data():
 		return
 
 
-	def trim(self,isochrone,plot=True,plot_file='data_trim.png'):
+	def trim(self,isochrone,plot=True,plot_file='data_trim.png',return_axis=False):
 
 		"""Apply some cuts to the data, based on the isochrone."""
 
@@ -154,7 +155,7 @@ class Data():
 									(self.colour < B_max_interp(self.magnitude) + 0.01 ) ) )[0]
 		if plot:
 
-			plt.figure(figsize=(4.5,6))
+			plt.figure(figsize=(3.3,4.5))
 			ax = plt.axes()
 			ax.scatter(self.colour,self.magnitude,c='k',s=0.2,alpha=0.6,marker='.')
 
@@ -191,7 +192,14 @@ class Data():
 			ax.set_ylabel(self.magnitude_label)
 			ax.set_ylim([self.magnitude_max+1,self.magnitude_min-1])
 			ax.set_xlim([np.min(isochrone.mag_colour_interp(xmag))-0.25,np.max(isochrone.mag_colour_interp(xmag))+0.5])
-			plt.savefig(plot_file)
+
+			if return_axis:
+				
+				return ax
+
+			else:
+				
+				plt.savefig(plot_file)
 
 
 		return
@@ -503,7 +511,7 @@ class PlotUtils():
 		if save_figure:
 			plt.savefig(plot_file)
 
-		return ax
+		return ax, yq3, yq3-yq2, yq4-yq3
 
 
 	def plot_prior_fb_q(fitter,n_samples=1000,ax=None,save_figure=True,plot_file='fb_q.png'):
@@ -592,26 +600,31 @@ class PlotUtils():
 
 		xmag = np.linspace(fitter.data.magnitude_min,fitter.data.magnitude_max,1001)
 
-		fig, ax = plt.subplots(1,4,figsize=(16,6))
+		fig, ax = plt.subplots(1,4,figsize=(6,3),sharey='row')
 
-		ax[0].scatter(fitter.data.colour,fitter.data.magnitude,s=1,c='k')
+		ax[0].scatter(fitter.data.colour,fitter.data.magnitude,s=0.5,c='k')
 		ax[0].plot(fitter.iso.mag_colour_interp(xmag),xmag,'g-',alpha=0.6)
-		ax[0].grid()
+		#ax[0].grid()
 		ax[0].set_xlabel(fitter.data.colour_label)
 		ax[0].set_ylabel(fitter.data.magnitude_label)
-		ax[0].set_ylim([fitter.data.magnitude_max+1,fitter.data.magnitude_min-1])
+		ax[0].set_ylim([fitter.data.magnitude_max+0.3,fitter.data.magnitude_min-1])
+		ax[0].tick_params(axis='y',which='both',direction='in',right=True)
+		ax[0].tick_params(axis='x',which='both',direction='in',top=True)
 
 		for i in range(1,4):
 
-		    mag, colour = fitter.model_realisation(params,n,add_observational_scatter=True)
-		    ax[i].scatter(colour[:n_single:],mag[:n_single],s=1,color='b')
-		    ax[i].scatter(colour[n_single:],mag[n_single:],s=1,color='r')
-		    ax[i].plot(fitter.iso.mag_colour_interp(xmag),xmag,'g-',alpha=0.6)
-		    ax[i].grid()
-		    ax[i].set_xlabel(fitter.data.colour_label)
-		    ax[i].set_ylabel(fitter.data.magnitude_label)
-		    ax[i].set_ylim([fitter.data.magnitude_max+1,fitter.data.magnitude_min-1])
+			mag, colour = fitter.model_realisation(params,n,add_observational_scatter=True)
+			ax[i].scatter(colour[:n_single:],mag[:n_single],s=0.5,color='b')
+			ax[i].scatter(colour[n_single:],mag[n_single:],s=0.5,color='r')
+			ax[i].plot(fitter.iso.mag_colour_interp(xmag),xmag,'g-',alpha=0.6)
+			#ax[i].grid()
+			ax[i].set_xlabel(fitter.data.colour_label)
+			ax[i].set_ylim([fitter.data.magnitude_max+0.3,fitter.data.magnitude_min-1])
+			ax[i].tick_params(axis='y',which='both',direction='in',right=True)
+			ax[i].tick_params(axis='x',which='both',direction='in',top=True)
 
+
+		plt.tight_layout()
 
 		plt.savefig(plot_file)
 
