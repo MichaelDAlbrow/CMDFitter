@@ -4,6 +4,12 @@ import pycuda.autoinit
 
 from pycuda.compiler import SourceModule
 
+#
+# This version expects that the PM (single) and PMQ (binary) coeffient arrays already include the single and binary fractions.
+#
+
+
+
 likelihood_functions = SourceModule("""
 
 #include <math.h>
@@ -139,10 +145,10 @@ __device__ double outlier_likelihood(double *info, double *Dk, double f_outlier)
 	D0[0] = info[0];
 	D0[1] = info[1];
 
-	S0[0][0] = info[2]*info[2];
-	S0[1][1] = info[3]*info[3];
-	S0[0][1] = 0.0;
-	S0[1][0] = 0.0;
+	S0[0][0] = info[2];
+	S0[1][1] = info[3];
+	S0[0][1] = info[4];
+	S0[1][0] = info[4];
 
     D[0] = Dk[0] - D0[0];
     D[1] = Dk[1] - D0[1];
@@ -161,7 +167,7 @@ __device__ double outlier_likelihood(double *info, double *Dk, double f_outlier)
 }
 
 
-__device__ void single_likelihood(double h, double *Dk, double Sk[2][2], double *PM, double f_single, double *result){
+__device__ void single_likelihood(double h, double *Dk, double Sk[2][2], double *PM, double *result){
 	
 	int nMB = 50;
 
@@ -206,7 +212,7 @@ __device__ void single_likelihood(double h, double *Dk, double Sk[2][2], double 
 
 	if (threadIdx.x == 0){
 
-		*result = lnp[0] - log(2.0*M_PI/f_single);
+		*result = lnp[0] - log(2.0*M_PI);
 
 	}
 
@@ -217,7 +223,7 @@ __device__ void single_likelihood(double h, double *Dk, double Sk[2][2], double 
 }
 
 
-__device__ void binary_likelihood(double h, double *Dk, double Sk[2][2], double *PMQ, double f_binary, double *result){
+__device__ void binary_likelihood(double h, double *Dk, double Sk[2][2], double *PMQ, double *result){
 	
 	int nMB = 50;
 	int nQB = 50;
@@ -257,7 +263,7 @@ __device__ void binary_likelihood(double h, double *Dk, double Sk[2][2], double 
 
 	if (threadIdx.x == 0){
 
-		*result = lnp[0] - log(2.0*M_PI/f_binary);
+		*result = lnp[0] - log(2.0*M_PI);
 
 	}
 
@@ -270,7 +276,7 @@ __device__ void binary_likelihood(double h, double *Dk, double Sk[2][2], double 
 
 
 
-__global__ void likelihood(double *PM_single, double *PMQ_binary, double *outlier_info, double h0, double h1, double h_magnitude_ref, double f_outlier, double f_binary, double *lnp_k){
+__global__ void likelihood(double *PM_single, double *PMQ_binary, double *outlier_info, double h0, double h1, double h_magnitude_ref, double f_outlier, double *lnp_k){
 
 
 	int k = blockIdx.x;
@@ -301,25 +307,18 @@ __global__ void likelihood(double *PM_single, double *PMQ_binary, double *outlie
 	__syncthreads();
 
 	double l_single = 0.0;
-	single_likelihood(h, Dk, Sk, PM_single, 1.0-f_outlier-f_binary, &l_single);
+	single_likelihood(h, Dk, Sk, PM_single, &l_single);
 
 	__syncthreads();
 
 	double l_binary;
-	binary_likelihood(h, Dk, Sk, PMQ_binary, f_binary, &l_binary);
+	binary_likelihood(h, Dk, Sk, PMQ_binary, &l_binary);
 
 	__syncthreads();
 
     if (threadIdx.x == 0) {
 		lnp_k[k] = logaddexp(l_outlier,l_single);
 		lnp_k[k] = logaddexp(lnp_k[k],l_binary);
-		//printf("%d %f %f %f %f %f %f\\n",k,Dk[0],Dk[1],l_outlier,l_single,l_binary,lnp_k[k]);
-		//for (int m = 0; m < 10; m++) {
-		//   printf("%d %12.9f %12.9f %12.9f %12.9f\\n",m,tex2D(cov,m,0),tex2D(cov,m,1),tex2D(cov,m,2),tex2D(cov,m,3));
-		//}
-		//for (int m = 0; m < 10; m++) {
-		//   printf("%d %f %f %12.9f %12.9f %12.9f %12.9f\\n",m,tex2D(DMQ,m,0),tex2D(DMQ,m,1),tex2D(SMQ,m,0),tex2D(SMQ,m,1),tex2D(SMQ,m,2),tex2D(SMQ,m,3));
-		//}
 	}
 
  	__syncthreads();
