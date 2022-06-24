@@ -50,7 +50,8 @@ class Data():
 
 		print('data definition:',data_dict)
 
-		data = np.loadtxt(data_dict['file'])
+		rawdata = np.loadtxt(data_dict['file'])
+		data = rawdata[~np.isnan(rawdata).any(axis=1),:]
 
 		self.magnitude = data[:,data_dict['column_mag']]
 
@@ -104,8 +105,6 @@ class Data():
 		c_cov = self.cov.reshape((len(self.magnitude),4),order='F')
 		self.cov_CUDA = likelihood_functions.get_texref("cov")
 		drv.matrix_to_texref(np.float32(c_cov),self.cov_CUDA,order='F')
-		#texarray = drv.np_to_array(np.float32(np.moveaxis(self.cov,0,-1)),order='F')
-		#self.cov_CUDA.set_array(texarray)
 		self.cov_CUDA.set_filter_mode(drv.filter_mode.POINT)
 
 		col_mag = np.vstack((self.colour,self.magnitude))
@@ -160,6 +159,13 @@ class Data():
 			ax.scatter(self.colour,self.magnitude,c='k',s=0.2,alpha=0.6,marker='.')
 
 
+		self.raw_magnitude = self.magnitude.copy()
+		self.raw_colour = self.colour.copy()
+
+		bad_points = np.setdiff1d(np.arange(len(self.magnitude)),good_points,assume_unique=True)
+		self.cut_magnitude = self.magnitude[bad_points]
+		self.cut_colour = self.colour[bad_points]
+
 		self.magnitude = self.magnitude[good_points]
 		self.colour = self.colour[good_points]
 		self.cov = self.cov[good_points]
@@ -199,6 +205,7 @@ class Data():
 
 			else:
 				
+				plt.tight_layout()
 				plt.savefig(plot_file)
 
 
@@ -583,20 +590,13 @@ class PlotUtils():
 		return ax
 
 
-	def plot_realisation(fitter,params,plot_file='realisation.png'):
+	def plot_realisation(fitter,params,plot_file='realisation.png',outliers=True):
 
 		"""Plot the data CMD and 3 comparative random realisations of the model implied by params."""
 
 		assert isinstance(fitter, CMDFitter)
 
 		n = len(fitter.data.magnitude)
-
-		fraction_good = 1.0 - params[-3]
-		fraction_single = (1.0-params[-4]-params[-3])/fraction_good
-		fraction_binary = 1.0 - fraction_single
-
-		n_single = int(round(fraction_single * n))
-		n_binary = int(n - n_single)
 
 		xmag = np.linspace(fitter.data.magnitude_min,fitter.data.magnitude_max,1001)
 
@@ -610,15 +610,18 @@ class PlotUtils():
 		ax[0].set_ylim([fitter.data.magnitude_max+0.3,fitter.data.magnitude_min-1])
 		ax[0].tick_params(axis='y',which='both',direction='in',right=True)
 		ax[0].tick_params(axis='x',which='both',direction='in',top=True)
+		xlimits = ax[0].get_xlim()
 
 		for i in range(1,4):
 
-			mag, colour = fitter.model_realisation(params,n,add_observational_scatter=True)
-			ax[i].scatter(colour[:n_single:],mag[:n_single],s=0.5,color='b')
-			ax[i].scatter(colour[n_single:],mag[n_single:],s=0.5,color='r')
+			mag, colour, star_type = fitter.model_realisation(params,n,add_observational_scatter=True,outliers=outliers)
+			ax[i].scatter(colour[star_type==0],mag[star_type==0],s=0.5,color='b')
+			ax[i].scatter(colour[star_type==1],mag[star_type==1],s=0.5,color='r')
+			ax[i].scatter(colour[star_type==2],mag[star_type==2],s=0.5,color='k')
 			ax[i].plot(fitter.iso.mag_colour_interp(xmag),xmag,'g-',alpha=0.6)
 			#ax[i].grid()
 			ax[i].set_xlabel(fitter.data.colour_label)
+			ax[i].set_xlim(xlimits)
 			ax[i].set_ylim([fitter.data.magnitude_max+0.3,fitter.data.magnitude_min-1])
 			ax[i].tick_params(axis='y',which='both',direction='in',right=True)
 			ax[i].tick_params(axis='x',which='both',direction='in',top=True)
@@ -668,15 +671,15 @@ class CMDFitter():
 		assert q_model in ['power','legendre']
 
 		if q_model == 'power':
-			self.ndim = 10
-			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$\beta$", r"$\alpha$", r"$B$", r"$f_B$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.2,0.55,0.0,0.0,1.0,0.0,0.5,0.01,1.0,0.00])
+			self.ndim = 11
+			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$\beta$", r"$\alpha$", r"$B$", r"$f_B$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
+			self.default_params = np.array([2.2,0.55,0.0,0.0,1.0,0.0,0.35,0.0,0.01,1.0,0.00])
 
 		if q_model == 'legendre':
-			self.ndim = 13
+			self.ndim = 14
 			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$a_1$", r"$a_2$", r"$a_3$", \
-						r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$",r"$f_B$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.4,0.55,0.006, 0.0,0.0,0.0, 0.0,0.0,0.0, 0.35,0.001, 1.0,0.0])
+						r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$", r"$f_B,0$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
+			self.default_params = np.array([2.4,0.55,0.006, 0.0,0.0,0.0, 0.0,0.0,0.0, 0.35,0.0, 0.001, 1.0,0.0])
 
 		self.freeze = np.zeros(self.ndim)
 		self.prefix = 'out_'
@@ -737,16 +740,23 @@ class CMDFitter():
 
 		self.mass_slice = np.array([self.iso.mag_M_interp(self.data.magnitude_max),self.iso.mag_M_interp(self.data.magnitude_min)])
 
+		self.M = self.iso.mag_M_interp(self.data.magnitude),
+
 		self.M_ref = np.mean(self.mass_slice)
 		self.delta_M = np.abs(self.mass_slice[0] - self.M_ref)
 
 		self.magnitude_ref = 0.5*(self.data.magnitude_min+self.data.magnitude_max)
 		self.delta_mag = self.data.magnitude_max - self.magnitude_ref
 
+		self.h_magnitude_ref = self.data.magnitude_min
+
 		# mean colour, magnitude and dispersions for outlier distribution.
 
-		self.outlier_description = np.ascontiguousarray([np.median(self.data.colour),self.magnitude_ref,0.75,4.0],dtype=np.float64)
-		self.h_magnitude_ref = self.data.magnitude_min
+		d = np.column_stack((self.data.colour,self.data.magnitude))
+		d_med = np.median(d,axis=0)
+		d_cov = 4.0*np.cov(d,rowvar=False)
+		self.outlier_description = np.ascontiguousarray([d_med[0],d_med[1],d_cov[0,0],d_cov[1,1],d_cov[0,1]],dtype=np.float64)
+
 
 		# set up basis functions for M and q
 
@@ -909,40 +919,73 @@ class CMDFitter():
 		return cov
 
 
-	def model_realisation(self,p,n,add_observational_scatter=True):
+	def model_realisation(self,p,n,add_observational_scatter=True,outliers=True):
 
-		"""Compute a random (magnitude, colour) realisation of the model paramterised by p (excluding outliers) for n stars.""" 
+		"""
+		Compute a random (magnitude, colour) realisation of the model paramterised by p for n stars.
+
+		Also return 		star_type = 0, 1, 2 for single stars, binaries, outliers.
+		""" 
 
 		assert self.q_model in ['power','legendre']
 
 		if self.q_model == 'power':
-			log_k, M0, gamma, beta, alpha, B, fb, fo, h0, h1 = p
+			log_k, M0, gamma, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
 
 		if self.q_model == 'legendre':
-			log_k, M0, gamma, a1, a2, a3, a1_dot, a2_dot,a3_dot, fb, fo, h0, h1 = p
+			log_k, M0, gamma, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1 = p
 
-		fraction_good = 1.0 - fo
-		fraction_single = (1.0-fb-fo)/fraction_good
-		fraction_binary = 1.0 - fraction_single
+		
+		star_type = np.zeros(n)
+		mag = np.zeros(n)
+		colour = np.zeros(n)
 
-		n_single = int(round(fraction_single * n))
-		n_binary = int(n - n_single)
+		if outliers:
 
+			n_outliers = int(round(fo*n))
+			cov = np.zeros((2,2))
+			cov[0,0] = self.outlier_description[2];
+			cov[1,1] = self.outlier_description[3];
+			cov[0,1] = self.outlier_description[4];
+			cov[1,0] = self.outlier_description[4];
+
+			d = np.random.multivariate_normal(self.outlier_description[:2], cov, n_outliers)
+
+			colour[:n_outliers] = d[:,0]
+			mag[:n_outliers] = d[:,1]
+			#colour[:n_outliers] = self.outlier_description[0] + self.outlier_description[2]*np.random.randn(n_outliers)
+			#mag[:n_outliers] = self.outlier_description[1] + self.outlier_description[3]*np.random.randn(n_outliers)
+			star_type[:n_outliers] = 2
+
+		else:
+
+			n_outliers = 0
+			fo = 0.0
+
+		# Draw n primaries
 		M_sampler = self.M_distribution_sampler(log_k,M0,gamma,self.mass_slice[1])
 		M1 = M_sampler(np.random.rand(n))
 
+		# Compute their binary probabilities and some random numbers
+		fb = fb0 + fb1*(self.mass_slice[1] - M1)
+		r = np.random.rand(n)
+
 		q = np.zeros_like(M1)
 
-		for i in range(n_binary):
+		for i in range(n_outliers,n):
 
-			if self.q_model == 'power':
-				q_sampler = self.q_distribution_sampler([alpha,beta,B,M1[n_single+i]])
-			if self.q_model == 'legendre':
-				q_sampler = self.q_distribution_sampler([a1,a2,a3,a1_dot,a2_dot,a3_dot,M1[n_single+i]])
+			if r[i] <= fb[i]/(1.0-fo):
 
-			q[n_single+i] = q_sampler(np.random.rand())
+				star_type[i] = 1
+
+				if self.q_model == 'power':
+					q_sampler = self.q_distribution_sampler([alpha,beta,B,M1[i]])
+				if self.q_model == 'legendre':
+					q_sampler = self.q_distribution_sampler([a1,a2,a3,a1_dot,a2_dot,a3_dot,M1[i]])
+
+				q[i] = q_sampler(np.random.rand())
 			
-		mag, colour = self.iso.binary(M1,q)
+		mag[n_outliers:], colour[n_outliers:] = self.iso.binary(M1[n_outliers:],q[n_outliers:])
 
 		if add_observational_scatter:
 
@@ -955,7 +998,7 @@ class CMDFitter():
 				colour[i] += z[0][0]
 				mag[i] += z[0][1]
 
-		return mag, colour
+		return mag, colour, star_type
 
 
 	def jacobian(self,M,q):
@@ -1017,10 +1060,17 @@ class CMDFitter():
 
 	def precalc(self,params):
 		
-		"""Return the grid of (M,q) bais function coefficients."""
+		"""Return the vector of mass basis function coefficients (for single stars) and 
+		the grid of (M,q) basis function coefficients (for binary stars). These are multiplied
+		by the single-star and binary-star fractions respectively."""
 
 		assert self.q_model in ['power','legendre']
 
+
+		fb0 = params[-5]
+		fb1 = params[-4]
+		fo = params[-3]
+		fb = fb0 + fb1*(self.mass_slice[1] - self.M0)
 
 		PMQ = np.zeros(self.n_bf**2)
 		Ma = self.M_gauss(params[:3])
@@ -1038,16 +1088,16 @@ class CMDFitter():
 
 			for i in range (self.n_bf):
 				for j in range(self.n_bf):
-					PMQ[i+j*self.n_bf] = Ma[i]*qa[j]
+					PMQ[i+j*self.n_bf] = Ma[i]*qa[j]*fb[i]
 
 		else:
 
 			for i in range (self.n_bf):
 				qa = self.q_gauss(params[3:6],self.M0[i])
 				for j in range(self.n_bf):
-					PMQ[i+j*self.n_bf] = Ma[i]*qa[j]
+					PMQ[i+j*self.n_bf] = Ma[i]*qa[j]*fb[i]
 
-		return Ma, PMQ
+		return Ma*(1.0-fb-fo), PMQ
 
 
 	def lnlikelihood(self,params):
@@ -1061,11 +1111,11 @@ class CMDFitter():
 
 		if self.q_model == 'power':
 
-			log_k, M0, gamma, beta, alpha, B, fb, fo, h0, h1 = p
+			log_k, M0, gamma, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
 
 		if self.q_model == 'legendre':
 
-			log_k, M0, gamma, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb, fo, h0, h1 = p
+			log_k, M0, gamma, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1 = p
 
 			# Check that the parameters generate a positive q distribution for all masses
 			for MM in np.linspace(self.mass_slice[0],self.mass_slice[1],31).tolist():
@@ -1078,7 +1128,6 @@ class CMDFitter():
 
 		P_i, PMQ = self.precalc(p)
 
-
 		c_P_i = np.ascontiguousarray(P_i.astype(np.float64))
 		c_PMQ = np.ascontiguousarray(PMQ.astype(np.float64))
 		
@@ -1088,7 +1137,7 @@ class CMDFitter():
 
 		lnP_k = np.zeros(len(self.data.magnitude)).astype(np.float64)
 
-		likelihood(drv.In(c_P_i), drv.In(c_PMQ), drv.In(self.outlier_description),np.float64(h0), np.float64(h1), np.float64(self.h_magnitude_ref),np.float64(fo), np.float64(fb), drv.InOut(lnP_k), block=blockshape, grid=gridshape)
+		likelihood(drv.In(c_P_i), drv.In(c_PMQ), drv.In(self.outlier_description),np.float64(h0), np.float64(h1), np.float64(self.h_magnitude_ref),np.float64(fo), drv.InOut(lnP_k), block=blockshape, grid=gridshape)
 
 		lnP = np.sum(lnP_k)
 
@@ -1118,9 +1167,11 @@ class CMDFitter():
 
 		if self.q_model == 'power':
 
-			log_k, M0, gamma, beta, alpha, B, fb, fo, h0, h1 = p
+			log_k, M0, gamma, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
 
-			if fb < 0.02 or fb > 0.95 or fo < 0.0 or fo > 0.05 or B < 0.0 or B > (1.0 + 1.0/(alpha+beta*self.delta_M)):
+			fb_end = fb0 + fb1*(self.mass_slice[1] - self.mass_slice[0])
+
+			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or fo < 0.0 or fo > 0.05 or B < 0.0 or B > (1.0 + 1.0/(alpha+beta*self.delta_M)):
 				return self.neginf 
 
 			log_h = np.log10(h0)
@@ -1131,9 +1182,11 @@ class CMDFitter():
 
 		if self.q_model == 'legendre':
 
-			log_k, M0, gamma, a1, a2, a3,  a1_dot, a2_dot, a3_dot, fb, fo, h0, h1 = p
+			log_k, M0, gamma, a1, a2, a3,  a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1 = p
 
-			if fb < 0.02 or fb > 0.95 or fo < 0.0 or fo > 0.05:
+			fb_end = fb0 + fb1*(self.mass_slice[1] - self.mass_slice[0])
+
+			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or fo < 0.0 or fo > 0.05:
 				return self.neginf 
 
 			log_h = np.log10(h0)
@@ -1159,7 +1212,7 @@ class CMDFitter():
 		if self.q_model == 'power':
 
 
-			# params are log k, M0, gamma, beta, alpha, B, fb, fo, h0, h1
+			# params are log k, M0, gamma, beta, alpha, B, fb0, fb1, fo, h0, h1
 
 			i = 0
 
@@ -1191,22 +1244,26 @@ class CMDFitter():
 				i += 1
 
 			if not self.freeze[6]:
-				# f_B
+				# fB0
 				x[6] = 0.93*u[i] + 0.02
 				i += 1
 			if not self.freeze[7]:
+				# fB1
+				[x7] = truncnorm.ppf(u[i], (x[6]-0.02)/(self.mass_slice[0]-self.mass_slice[1]), (x[6]-0.95)/(self.mass_slice[0]-self.mass_slice[1]), loc=0.0, scale=0.3)
+				i += 1
+			if not self.freeze[8]:
 				# f_O
-				x[7] = 0.05*u[i]
+				x[8] = 0.1*u[i]
 				i += 1
 
-			if not self.freeze[8]:
+			if not self.freeze[9]:
 				# log h0
 				logh = norm.ppf(u[i], loc=0.1, scale=0.3)
-				x[8] = 10.0**logh
+				x[9] = 10.0**logh
 				i += 1
-			if not self.freeze[9]:
+			if not self.freeze[10]:
 				# h1
-				x[9] = truncnorm.ppf(u[i], 0.0, 2.0*x[8], loc=0.0, scale=0.4*x[8])
+				x[10] = truncnorm.ppf(u[i], 0.0, 2.0*x[9], loc=0.0, scale=0.4*x[9])
 				i += 1
 
 		if self.q_model == 'legendre':
@@ -1256,22 +1313,26 @@ class CMDFitter():
 				i += 1
 
 			if not self.freeze[9]:
-				# f_B
+				# f_B0
 				x[9] = 0.93*u[i] + 0.02
 				i += 1
 			if not self.freeze[10]:
+				# fB1
+				x[10] = truncnorm.ppf(u[i], (x[9]-0.02)/(self.mass_slice[0]-self.mass_slice[1]), (x[9]-0.95)/(self.mass_slice[0]-self.mass_slice[1]), loc=0.0, scale=0.3)
+				i += 1
+			if not self.freeze[11]:
 				# f_O
-				x[10] = 0.05*u[i]
+				x[11] = 0.1*u[i]
 				i += 1
 
-			if not self.freeze[11]:
+			if not self.freeze[12]:
 				# log h0
 				logh = norm.ppf(u[i], loc=0.1, scale=0.3)
-				x[11] = 10.0**logh
+				x[12] = 10.0**logh
 				i += 1
-			if not self.freeze[12]:
+			if not self.freeze[13]:
 				# h1
-				x[12] = truncnorm.ppf(u[i], 0.0, 2.0, loc=0.0, scale=0.4*x[11])
+				x[13] = truncnorm.ppf(u[i], 0.0, 2.0, loc=0.0, scale=0.4*x[12])
 				i += 1
 
 		y = x[self.freeze==0]
@@ -1367,10 +1428,11 @@ class CMDFitter():
 		plt.savefig(prefix+'corner.png')
 
 
-	def dynesty_sample(self,prefix='dy_'):
+	def dynesty_sample(self,prefix='dy_',jitter=False):
 
 		from dynesty import NestedSampler
 		from dynesty import plotting as dyplot
+		from dynesty import utils as dyfunc
 
 		self.prefix = prefix
 
@@ -1391,20 +1453,38 @@ class CMDFitter():
 
 		res.summary()
 
-		fig, axes = dyplot.runplot(res)
-		plt.savefig(prefix+'summary.png')
+		try:
+			fig, axes = dyplot.runplot(res)
+			plt.savefig(prefix+'summary.png')
+		except:
+			print('dyplot.runplot failed')
 
-
-		fig, axes = dyplot.traceplot(res, show_titles=True,trace_cmap='viridis',
+		try:
+			fig, axes = dyplot.traceplot(res, show_titles=True,trace_cmap='viridis',
 		                         connect=True,connect_highlight=range(5),labels=labels)
-		plt.savefig(prefix+'trace.png')
+			plt.savefig(prefix+'trace.png')
+		except:
+			print('dyplot.traceplot failed')
 
 
-		fig, axes = plt.subplots(ndim, ndim, figsize=(15, 15))
-		axes = axes.reshape((ndim, ndim))  # reshape axes
-		fg, ax = dyplot.cornerplot(res, color='blue',show_titles=True,max_n_ticks=3,labels=labels,
-		                        quantiles=None,fig=(fig,axes))
-		plt.savefig(prefix+'corner.png')
+		try:
+			fig, axes = plt.subplots(ndim, ndim, figsize=(15, 15))
+			axes = axes.reshape((ndim, ndim))  # reshape axes
+			fg, ax = dyplot.cornerplot(res, color='blue',show_titles=True,max_n_ticks=3,labels=labels,
+			                        quantiles=None,fig=(fig,axes))
+			plt.savefig(prefix+'corner.png')
+		except:
+			print('dyplot.cornerplot failed')
+
+		if jitter:
+
+			lnzs = np.zeros((100, len(res.logvol)))
+			for i in range(100):
+				res_j = dyfunc.jitter_run(res)
+				lnzs[i] = res_j.logz[-1]
+			lnz_mean, lnz_std = np.mean(lnzs), np.std(lnzs)
+			print('Jitter logz:        {:6.3f} +/- {:6.3f}'.format(lnz_mean, lnz_std))
+
 
 
 	def ultranest_sample(self,prefix='un_',stepsampler=False):
@@ -1428,7 +1508,7 @@ class CMDFitter():
 			sampler.stepsampler = ultranest.stepsampler.SliceSampler(nsteps=nsteps,generate_direction=ultranest.stepsampler.generate_mixture_random_direction)
 
 
-		result = sampler.run(min_num_live_points=400)
+		result = sampler.run(min_num_live_points=400, min_ess=10000)
 
 		sampler.print_results()
 
