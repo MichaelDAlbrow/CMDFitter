@@ -66,6 +66,15 @@ class Data():
 		self.colour_label = data_dict['colour_label']
 		self.magnitude_label = data_dict['magnitude_label']
 
+
+		self.trim_left = 0.05
+		self.trim_right = 0.2
+		if 'trim_left' in data_dict:
+			self.trim_left = data_dict['trim_above']
+		if 'trim_right' in data_dict:
+			self.trim_right = data_dict['trim_right']
+
+
 		# set up data covariance matrices
 
 		self.cov = np.empty((len(self.magnitude),2,2),dtype='float32')
@@ -170,8 +179,8 @@ class Data():
 		self.colour = self.colour[good_points]
 		self.cov = self.cov[good_points]
 
-		data_iso_mag = isochrone.colour_mag_interp(self.colour)
-		good_points = np.where( (self.magnitude - data_iso_mag > -1.3) & (self.magnitude - data_iso_mag < 0.55) )[0]
+		data_iso_colour = isochrone.mag_colour_interp(self.magnitude)
+		good_points = np.where( (self.colour - data_iso_colour > -self.trim_left) & (self.colour - data_iso_colour < self.trim_right) )[0]
 
 		self.magnitude = self.magnitude[good_points]
 		self.colour = self.colour[good_points]
@@ -187,9 +196,9 @@ class Data():
 			ax.plot(isochrone.colour,isochrone.magnitude,'b--',alpha=1.0)
 
 			xmag = np.linspace(self.magnitude_min+0.5,self.magnitude_max+0.5,1001)
-			ax.plot(isochrone.mag_colour_interp(xmag),xmag - 1.30,'c-',alpha=1.0)
+			ax.plot(isochrone.mag_colour_interp(xmag)-self.trim_left,xmag,'c-',alpha=1.0)
 			xmag = np.linspace(self.magnitude_min-0.55,self.magnitude_max-0.55,1001)
-			ax.plot(isochrone.mag_colour_interp(xmag),xmag + 0.55,'c-',alpha=1.0)
+			ax.plot(isochrone.mag_colour_interp(xmag)+self.trim_right,xmag,'c-',alpha=1.0)
 
 			ax.plot(B_min_colour,B_min_mag,'c-')
 			ax.plot(B_max_colour,B_max_mag,'c-')
@@ -233,6 +242,7 @@ class Isochrone():
 										column_mag: (int) column number in file corresponding to magnitude
 										column_colour_blue: (int) column number in file for blue component of colour  
 										column_colour_red: (int) column number in file for red component of colour  
+										column_initial_mass: (int) column number in file for initial mass
 										column_mass: (int) column number in file for mass
 										magnitude_offset: (float) add to isochrone magnitude to match data
 										colour_offset: (float) add to isochrone colour to match data
@@ -247,13 +257,20 @@ class Isochrone():
 
 		iso_data = np.loadtxt(isochrone_dict['file'])
 
+		if 'initial_mass' in isochrone_dict:
+			q = np.where(iso_data[:,isochrone_dict['initial_mass']] - iso_data[:,isochrone_dict['star_mass']] < 1.e-2)[0]
+			iso_data = iso_data[q]
+
 		# cut to exclude white dwarfs
-		cut = np.where((iso_data[:,isochrone_dict['column_blue']]-iso_data[:,isochrone_dict['column_red']])>0.25)[0]
+		cut = np.where((iso_data[:,isochrone_dict['column_blue']]-iso_data[:,isochrone_dict['column_red']])>0.0)[0]
 		iso_data = iso_data[cut]
 
 		self.magnitude = iso_data[:,isochrone_dict['column_mag']] + isochrone_dict['magnitude_offset']
 		self.colour = iso_data[:,isochrone_dict['column_blue']] - iso_data[:,isochrone_dict['column_red']] + isochrone_dict['colour_offset']
 		self.colour_offset = isochrone_dict['colour_offset']
+
+		self.magnitude_min = isochrone_dict['magnitude_min']
+		self.magnitude_max = isochrone_dict['magnitude_max']
 
 
 		if colour_correction_data is not None:
@@ -272,14 +289,19 @@ class Isochrone():
 
 		ind = np.argsort(self.magnitude[pts])
 		self.mag_M_interp = PchipInterpolator(self.magnitude[pts][ind],iso_M[pts][ind])
-		self.M_mag_interp = PchipInterpolator(iso_M[pts],self.magnitude[pts])
-		self.M_red_interp = PchipInterpolator(iso_M[pts],iso_red[pts])
-		self.M_blue_interp = PchipInterpolator(iso_M[pts],iso_blue[pts])
+
+		iso_M_increasing = iso_M[pts]+1e-6*np.arange(len(pts))
+		self.M_mag_interp = PchipInterpolator(iso_M_increasing,self.magnitude[pts])
+		self.M_red_interp = PchipInterpolator(iso_M_increasing,iso_red[pts])
+		self.M_blue_interp = PchipInterpolator(iso_M_increasing,iso_blue[pts])
+
 		colour = self.colour[pts]+self.colour_correction(self.magnitude[pts])
 		ind = np.argsort(colour)
 		self.colour_mag_interp = PchipInterpolator(colour[ind],self.magnitude[pts][ind])
 		ind = np.argsort(self.magnitude[pts])
 		self.mag_colour_interp = PchipInterpolator(self.magnitude[pts][ind],colour[ind])
+
+		self.plot_luminosity_mass_functions(colour_correction_data)
 
 		return
 
@@ -299,13 +321,16 @@ class Isochrone():
 		nbins = np.int(2*(data.magnitude_max - data.magnitude_min) + 0.5)
 
 		y = np.empty(nbins)
+		luminosity_function = np.empty(nbins)
 
 		edges = np.linspace(data.magnitude_min,data.magnitude_max,nbins+1)
 		centres = 0.5*(edges[1:]+edges[:-1])
 
+
 		for i in range(nbins):
 
 			pts = np.where((data.magnitude > edges[i]) & (data.magnitude <= edges[i+1]))[0]
+			luminosity_function[i] = len(pts)
 
 			# Construct a histogram and find the maximum of a parabola that passes through the maximum and the point on each side.
 
@@ -321,12 +346,15 @@ class Isochrone():
 
 		delta_interp = PchipInterpolator(centres,y)
 
+		self.lf_centres = centres
+		self.lf_n = luminosity_function
+
 		if plot:
 
 			plt.figure(figsize=(4.5,6))
 			ax = plt.axes()
 			ax.scatter(data.colour,data.magnitude,marker='.',c='k',s=0.2)
-			xmag = np.linspace(data.magnitude_min,data.magnitude_max,1001)
+			xmag = np.linspace(self.magnitude_min,self.magnitude_max,1001)
 			ax.plot(iso_colour_interp(xmag),xmag,'b--',alpha=0.7)
 			ax.plot(iso_colour_interp(xmag)+delta_interp(xmag),xmag,'r-',alpha=0.7)
 			ax.set_xlabel(data.colour_label)
@@ -336,6 +364,54 @@ class Isochrone():
 			plt.savefig(plot_file)
 
 		return delta_interp
+
+
+
+	def plot_luminosity_mass_functions(self,data,plot_file='ML_functions.png'):
+
+			if data is not None:
+				magnitude_label = data.magnitude_label
+			else:
+				magnitude_label = 'Magnitude'
+
+			fig, ax = plt.subplots(3,2,figsize=(8,10))
+
+			ax[0,0].scatter(self.lf_centres,self.lf_n,marker='.',c='b',s=20)
+			ax[0,0].set_xlabel(magnitude_label)
+			ax[0,0].set_ylabel(r'$N$')
+			ylim = ax[0,0].get_ylim()
+			ax[0,0].set_ylim((0,ylim[1]))
+
+			ax[1,0].scatter(self.mag_M_interp(self.lf_centres),self.lf_n,marker='.',c='b',s=20)
+			ax[1,0].set_xlabel(r'$Mass (M_\odot)$')
+			ax[1,0].set_ylabel(r'$N$')
+			ax[1,0].set_ylim((0,ylim[1]))
+
+			ax[2,0].scatter(np.log10(self.mag_M_interp(self.lf_centres)),self.lf_n,marker='.',c='b',s=20)
+			ax[2,0].set_xlabel(r'$\log_{10} Mass (M_\odot)$')
+			ax[2,0].set_ylabel(r'$N$')
+			ax[2,0].set_ylim((0,ylim[1]))
+
+			ax[0,1].scatter(self.lf_centres,np.log10(self.lf_n),marker='.',c='b',s=20)
+			ax[0,1].set_xlabel(magnitude_label)
+			ax[0,1].set_ylabel(r'$\log_{10} N$')
+			ylim = ax[0,1].get_ylim()
+			ax[0,1].set_ylim((0,ylim[1]))
+
+			ax[1,1].scatter(self.mag_M_interp(self.lf_centres),np.log10(self.lf_n),marker='.',c='b',s=20)
+			ax[1,1].set_xlabel(r'$Mass (M_\odot)$')
+			ax[1,1].set_ylabel(r'$\log_{10} N$')
+			ax[1,1].set_ylim((0,ylim[1]))
+
+			ax[2,1].scatter(np.log10(self.mag_M_interp(self.lf_centres)),np.log10(self.lf_n),marker='.',c='b',s=20)
+			ax[2,1].set_xlabel(r'$\log_{10} Mass (M_\odot)$')
+			ax[2,1].set_ylabel(r'$\log_{10} N$')
+			ax[2,1].set_ylim((0,ylim[1]))
+
+			plt.tight_layout()
+
+			plt.savefig(plot_file)
+	
 
 
 	def mag_to_flux(self,m,c=20):
@@ -376,6 +452,50 @@ class Isochrone():
 
 
 class PlotUtils():
+
+
+	def plot_mass_function(fitter,samples,logp=False,weights=None,ax=None,n_plot_samples=1000,save_figure=True,plot_file='mass_function.png'):
+
+		"""Plot the implied mass function for n_plot_samples drawn randomly from samples."""
+
+		import random
+
+		assert isinstance(fitter,CMDFitter)
+
+		if ax is None:
+			ax = plt.axes()
+
+		m = np.linspace(fitter.mass_slice[0],fitter.mass_slice[1],1001)
+
+		ns = samples.shape[0]
+
+		if weights is not None:
+			weights = weights.tolist()
+
+		for i in range(n_plot_samples):
+			p = fitter.default_params.copy()
+			ind = random.choices(range(ns),k=1,weights=weights)
+			p[np.where(fitter.freeze == 0)] = samples[ind]
+			if logp:
+				ax.plot(m,np.log10(fitter.M_distribution(m,p[:fitter.q_index])),'b-',alpha=0.01)
+			else:
+				ax.plot(m,fitter.M_distribution(m,p[:fitter.q_index]),'b-',alpha=0.01)
+		#ax.set_ylim((0,4))
+		#ax.set_xlim((0,1))
+
+		ax.set_xlabel(r'$M$')
+
+		if logp:
+			ax.set_ylabel(r'$P(\log_{10} M)$')
+		else:
+			ax.set_ylabel(r'$P(M)$')
+
+		if save_figure:
+			plt.savefig(plot_file)
+
+		return ax
+
+
 
 
 	def plot_q_distribution(fitter,samples,weights=None,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png'):
@@ -436,9 +556,9 @@ class PlotUtils():
 
 		for i in range(n_plot_samples):
 
-			x = np.random.rand(13)
+			x = np.random.rand(fitter.ndim)
 			p = fitter.prior_transform(x)
-			args = p[3:9].tolist()
+			args = p[4:10].tolist()
 			args.append(fitter.M_ref)
 			ax.plot(q,fitter.q_distribution(q,args),'b-',alpha=0.01)
 
@@ -486,10 +606,10 @@ class PlotUtils():
 
 				p = fitter.default_params.copy()
 				p[fitter.freeze == 0] = samples[i]
-				y[i] = p[9] * ((1.0  - fitter.int_sl_0(q[j])) + \
-						p[3]*(0.0 - fitter.int_sl_1(q[j])) + \
-						p[4]*(0.0 - fitter.int_sl_2(q[j])) + \
-						p[5]*(0.0 - fitter.int_sl_3(q[j])) )
+				y[i] = p[-5] * ((1.0  - fitter.int_sl_0(q[j])) + \
+						p[4]*(0.0 - fitter.int_sl_1(q[j])) + \
+						p[5]*(0.0 - fitter.int_sl_2(q[j])) + \
+						p[6]*(0.0 - fitter.int_sl_3(q[j])) )
 
 			wq  = DescrStatsW(data=y,weights=weights)
 			qq = wq.quantile(probs=np.array(0.01*np.array([50.0-sig2,50.0-sig1,50.0,50.0+sig1,50.0+sig2])),\
@@ -545,7 +665,7 @@ class PlotUtils():
 		yq4 = np.zeros(101)
 		yq5 = np.zeros(101)
 
-		x = np.random.rand(n_samples,13)
+		x = np.random.rand(n_samples,fitter.ndim)
 
 		y = np.zeros(n_samples)
 
@@ -642,7 +762,7 @@ class PlotUtils():
 class CMDFitter():
 
 
-	def __init__(self,json_file=None,data=None,isochrone=None,trim_data=True,q_model='legendre'):
+	def __init__(self,json_file=None,data=None,isochrone=None,trim_data=True,q_model='legendre',m_model='power',outlier_scale=2.0):
 
 
 		"""
@@ -659,7 +779,9 @@ class CMDFitter():
 
 			trim_data:		(boolean) data will be filtered if true
 
-			q_model:		(string) functional form for q distribution. Must be "power" or "legendre".
+			q_model:		(string) functional form for q distribution. Must be "power" or "legendre"
+
+			outlier_scale   (float) multiplicative constant to scale the bivariate gaussian data distribution to make the outlier distribution
 
 		"""
 
@@ -669,43 +791,58 @@ class CMDFitter():
 
 
 		assert q_model in ['power','legendre']
+		assert m_model in ['power','legendre']
 
 		if q_model == 'power':
-			self.ndim = 11
-			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$\beta$", r"$\alpha$", r"$B$", r"$f_B$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.2,0.55,0.0,0.0,1.0,0.0,0.35,0.0,0.01,1.0,0.00])
+			self.ndim = 13
+			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$c_1$", r"$\beta$", r"$\alpha$", r"$B$", r"$f_B$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
+			self.default_params = np.array([2.2,0.55,0.0,0.0,0.0,   0.0,1.0,0.0,  0.35,0.0,0.01,  1.0,0.00])
+			self.q_index = 5
 
 		if q_model == 'legendre':
-			self.ndim = 14
-			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$a_1$", r"$a_2$", r"$a_3$", \
+			self.ndim = 16
+			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$c_1$",  r"$a_1$", r"$a_2$", r"$a_3$", \
 						r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$", r"$f_B,0$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.4,0.55,0.006, 0.0,0.0,0.0, 0.0,0.0,0.0, 0.35,0.0, 0.001, 1.0,0.0])
+			self.default_params = np.array([2.4,0.55,0.006,0.0,0.0,   0.0,0.0,0.0, 0.0,0.0,0.0, 0.35,0.0, 0.001, 1.0,0.0])
+			self.q_index = 5
+
+		if m_model == 'legendre':
+			self.labels[4] = [r"$b_1$", r"$b_2$", r"$b_3$", r"$b_4$"]
+			self.default_params[:4] = np.array([0.0,0.0,0.0,0.0])
+			self.ndim -= 1
+			self.q_index = 4
 
 		self.freeze = np.zeros(self.ndim)
 		self.prefix = 'out_'
 
 		# Options are 'power' and 'legendre' (actually a shifted-legendre basis)
 		self.q_model = q_model
+		self.m_model = m_model
 
 		# Shifted Legendre polynomials
 		self.sl_0 = lambda x: x*0.0 + 1.0
 		self.sl_1 = lambda x: 2.0*x - 1.0
 		self.sl_2 = lambda x: 6.0*x**2 - 6.0*x + 1.0
 		self.sl_3 = lambda x: 20.0*x**3 - 30.0*x**2 + 12.0*x - 1.0
+		self.sl_4 = lambda x: 70.0*x**4 - 140.0*x**3 + 90.0*x**2 - 20.0*x + 1.0
 
 		# Derivatives of shifted Legendre polynomials
 		self.der_sl_0 = lambda x: 0.0
 		self.der_sl_1 = lambda x: 2.0
 		self.der_sl_2 = lambda x: 12.0*x - 6.0
 		self.der_sl_3 = lambda x: 60.0*x**2 - 60.0*x + 12.0
+		self.der_sl_4 = lambda x: 280.0*x**3 - 420.0*x**2 + 180.0*x - 20.0
 
 		# Integrals of shifted Legendre polynomials
 		self.int_sl_0 = lambda x: x
 		self.int_sl_1 = lambda x: x**2 - x
 		self.int_sl_2 = lambda x: 2.0*x**3 - 3.0*x**2 + x
 		self.int_sl_3 = lambda x: 5.0*x**4 - 10.0*x**3 + 6.0*x**2 - x
+		self.int_sl_4 = lambda x: 14.0*x**5 - 35.0*x**4 + 30.0*x**3 - 10.0*x**2 + x
 
 		self.neginf = -np.inf
+
+		self.scale_fo = 0.02
 
 
 		# Exit now if no input provided
@@ -739,6 +876,8 @@ class CMDFitter():
 		self.data.upload_to_GPU()
 
 		self.mass_slice = np.array([self.iso.mag_M_interp(self.data.magnitude_max),self.iso.mag_M_interp(self.data.magnitude_min)])
+		self.mass_range = self.mass_slice[1] - self.mass_slice[0]
+		print('Mass range:',self.mass_slice,self.mass_range)
 
 		self.M = self.iso.mag_M_interp(self.data.magnitude),
 
@@ -754,7 +893,7 @@ class CMDFitter():
 
 		d = np.column_stack((self.data.colour,self.data.magnitude))
 		d_med = np.median(d,axis=0)
-		d_cov = 4.0*np.cov(d,rowvar=False)
+		d_cov = outlier_scale**2*np.cov(d,rowvar=False)
 		self.outlier_description = np.ascontiguousarray([d_med[0],d_med[1],d_cov[0,0],d_cov[1,1],d_cov[0,1]],dtype=np.float64)
 
 
@@ -831,30 +970,50 @@ class CMDFitter():
 
 
 
-	def M_distribution(self,x,log_k,x0,gamma,maxM):
+	def M_distribution(self,x,params):
 
 		"""Evaluate mass function at x."""
 
-		k = 10.0**log_k
-		m = np.linspace(0.1,1.1,1000)
-		dm = m[1]-m[0]
-		y = m**(-gamma) / (1.0 + np.exp(-k*(m-x0)))
-		y[m>maxM] = 0.0
-		normalM = 1.0 / (np.sum(y)*dm)
-		y = normalM * x**(-gamma) / (1.0 + np.exp(-k*(x-x0)))
-		y[x>maxM] = 0.0
-		return y
+		assert self.m_model in ['power','legendre']
+
+		if self.m_model == 'power':
+			log_k,x0,gamma,c0, c1 = params
+			k = 10.0**log_k
+			m = np.linspace(self.mass_slice[0],self.mass_slice[1],1000)
+			y = (c0 + c1*(m-self.mass_slice[0]) + m**(-gamma) )/ (1.0 + np.exp(-k*(m-x0)) )
+			normalM = 1.0 / (np.sum(y)*(m[1]-m[0]))
+
+			y =  normalM * (c0 + c1*(x-self.mass_slice[0]) + x**(-gamma)) / (1.0 + np.exp(-k*(x-x0)))
+			y[x<self.mass_slice[0]] = 0.0
+			y[x>self.mass_slice[1]] = 0.0
+			return y
+
+		if self.m_model == 'legendre':
+			b1, b2, b3, b4 = params
+			m = np.linspace(self.mass_slice[0],self.mass_slice[1],1000)
+			xm = (m - self.mass_slice[0]) / self.mass_range
+			y = self.sl_0(xm) + b1*self.sl_1(xm) + b2*self.sl_2(xm) + b3*self.sl_3(xm) + b4*self.sl_4(xm)
+			normalM = 1.0 / (np.sum(y)*(m[1]-m[0]))
+
+			xm = (x - self.mass_slice[0]) / self.mass_range
+			y = self.sl_0(xm) + b1*self.sl_1(xm) + b2*self.sl_2(xm) + b3*self.sl_3(xm) + b4*self.sl_4(xm)
+			y[x<self.mass_slice[0]] = 0.0
+			y[x>self.mass_slice[1]] = 0.0
+			y *= normalM
+
+			return y
 
 
-	def M_distribution_sampler(self,log_k,x0,gamma,maxM):
+
+	def M_distribution_sampler(self,params):
 
 		"""Return a function that maps the range (0,1) onto the mass function.""" 
 
-		m = np.linspace(0.1,maxM,1000)
+		m = np.linspace(self.mass_slice[0],self.mass_slice[1],1000)
 
-		y = self.M_distribution(m,log_k,x0,gamma,maxM)
-
-		y_cumulative = np.cumsum(y)/np.sum(y)
+		y = self.M_distribution(m,params)+np.arange(1000)*1.e-6
+		pts = np.where(y>0.0)[0]
+		y_cumulative = np.cumsum(y[pts])/np.sum(y[pts])
 		pts = np.where(y_cumulative>1.e-50)[0]
 		return PchipInterpolator(y_cumulative[pts],m[pts])
 
@@ -930,10 +1089,10 @@ class CMDFitter():
 		assert self.q_model in ['power','legendre']
 
 		if self.q_model == 'power':
-			log_k, M0, gamma, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
+			log_k, M0, gamma, c0, c1, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
 
 		if self.q_model == 'legendre':
-			log_k, M0, gamma, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1 = p
+			log_k, M0, gamma, c0, c1, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1 = p
 
 		
 		star_type = np.zeros(n)
@@ -963,7 +1122,7 @@ class CMDFitter():
 			fo = 0.0
 
 		# Draw n primaries
-		M_sampler = self.M_distribution_sampler(log_k,M0,gamma,self.mass_slice[1])
+		M_sampler = self.M_distribution_sampler(p[:self.q_index])
 		M1 = M_sampler(np.random.rand(n))
 
 		# Compute their binary probabilities and some random numbers
@@ -1022,13 +1181,11 @@ class CMDFitter():
 
 
 
-	def M_gauss(self,Mparams):
+	def M_gauss(self,params):
 		
 		"""Return the (positive) coefficients for mapping the mass basis functions onto the mass function."""
 
-		log_k, M0, gamma = Mparams
-
-		My = self.M_distribution(self.Mx,log_k, M0, gamma, self.mass_slice[1])
+		My = self.M_distribution(self.Mx,params)
 		
 		Mb = np.zeros(self.n_bf)
 		for k in range(self.n_bf):
@@ -1073,16 +1230,16 @@ class CMDFitter():
 		fb = fb0 + fb1*(self.mass_slice[1] - self.M0)
 
 		PMQ = np.zeros(self.n_bf**2)
-		Ma = self.M_gauss(params[:3])
+		Ma = self.M_gauss(params[:self.q_index])
 
 		if (np.abs(params[4]) < 1.e-5) or (self.q_model == 'legendre'):
 
 			if self.q_model == 'power':
-				args = params[3:6].tolist()
+				args = params[self.q_index:self.q_index+3].tolist()
 				args.append(self.M0[0])
 				qa = self.q_gauss(args)
 			if self.q_model == 'legendre':
-				args = params[3:9].tolist()
+				args = params[self.q_index:self.q_index+6].tolist()
 				args.append(self.M0[0])
 				qa = self.q_gauss(args)
 
@@ -1093,7 +1250,7 @@ class CMDFitter():
 		else:
 
 			for i in range (self.n_bf):
-				qa = self.q_gauss(params[3:6],self.M0[i])
+				qa = self.q_gauss(params[self.q_index:self.q_index+3],self.M0[i])
 				for j in range(self.n_bf):
 					PMQ[i+j*self.n_bf] = Ma[i]*qa[j]*fb[i]
 
@@ -1107,19 +1264,22 @@ class CMDFitter():
 		p = self.default_params.copy()
 		p[self.freeze==0] = params
 
+		fo = p[-3]
+		h0 = p[-2]
+		h1 = p[-1]
+
 		assert self.q_model in ['power','legendre']
 
-		if self.q_model == 'power':
+		# Check that the parameters generate positive q distributions for all masses, and a positive M distribution.
 
-			log_k, M0, gamma, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
+		m_dist_test = self.M_distribution(np.linspace(self.mass_slice[0],self.mass_slice[1],101),p[:self.q_index])
+		if np.min(m_dist_test) < 0.0:
+			return self.neginf
 
 		if self.q_model == 'legendre':
 
-			log_k, M0, gamma, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1 = p
-
-			# Check that the parameters generate a positive q distribution for all masses
 			for MM in np.linspace(self.mass_slice[0],self.mass_slice[1],31).tolist():
-				args = p[3:9].tolist()
+				args = p[self.q_index:self.q_index+6].tolist()
 				args.append(MM)
 				q_dist_test = self.q_distribution(np.linspace(0.0,1.0,101),args)
 				if np.min(q_dist_test) < 0.0:
@@ -1133,7 +1293,6 @@ class CMDFitter():
 		
 		blockshape = (int(256),1, 1)
 		gridshape = (len(self.data.magnitude), 1)
-		#gridshape = (1, 1)
 
 		lnP_k = np.zeros(len(self.data.magnitude)).astype(np.float64)
 
@@ -1164,35 +1323,56 @@ class CMDFitter():
 		p[self.freeze==0] = params
 
 		assert self.q_model in ['power','legendre']
+		assert self.m_model in ['power','legendre']
 
 		if self.q_model == 'power':
 
-			log_k, M0, gamma, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
+			if self.m_model == 'power':
+				log_k, M0, gamma, c0, c1, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
+			else:
+				b1, b2, b3, b4, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
 
-			fb_end = fb0 + fb1*(self.mass_slice[1] - self.mass_slice[0])
+			fb_end = fb0 + fb1*self.mass_range
 
-			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or fo < 0.0 or fo > 0.05 or B < 0.0 or B > (1.0 + 1.0/(alpha+beta*self.delta_M)):
+			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or B < 0.0 or B > (1.0 + 1.0/(alpha+beta*self.delta_M)):
 				return self.neginf 
 
 			log_h = np.log10(h0)
 
-			prior = norm.pdf(log_k,loc=2.0,scale=0.3) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * norm.pdf(gamma,loc=0.0,scale=1.0) * norm.pdf(beta,loc=0.0,scale=2.0) * \
+			if self.m_model == 'power':
+				prior = norm.pdf(log_k,loc=2.0,scale=0.3) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * norm.pdf(gamma,loc=0.0,scale=2.0) * \
+								truncnorm.pdf(c0,0.0,1.0/self.mass_range,loc=0.0,scale=0.1/self.mass_range) * truncnorm.pdf(c1,-c0/self.mass_range,c0/self.mass_range,loc=0.0,scale=0.5*c0/self.mass_range)
+			else:
+				prior = norm.pdf(b1,loc=0.0,scale=2.0) * norm.pdf(b2,loc=0.0,scale=2.0) * norm.pdf(b3,loc=0.0,scale=2.0) * norm.pdf(b4,loc=0.0,scale=2.0)
+
+
+			prior *= truncnorm.pdf(fo, 0.0, self.scale_fo*6, loc=0.0, scale=self.scale_fo) * norm.pdf(beta,loc=0.0,scale=2.0) * \
 						truncnorm.pdf(alpha + np.abs(beta)*self.delta_M,0.0,20.0,loc=0.0,scale=3.0) * norm.pdf(log_h,loc=0.1,scale=0.3) * \
 						truncnorm.pdf(h1,0.0,2.0,loc=0.0,scale=0.4*h0)
 
 		if self.q_model == 'legendre':
 
-			log_k, M0, gamma, a1, a2, a3,  a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1 = p
+			if self.m_model == 'power':
+				log_k, M0, gamma, c0, c1, a1, a2, a3,  a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1 = p
+			else:
+				b1, b2, b3, b4, a1, a2, a3,  a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1 = p
 
-			fb_end = fb0 + fb1*(self.mass_slice[1] - self.mass_slice[0])
+			fb_end = fb0 + fb1*self.mass_range
 
-			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or fo < 0.0 or fo > 0.05:
+			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95:
 				return self.neginf 
 
 			log_h = np.log10(h0)
 
-			prior = norm.pdf(log_k,loc=2.0,scale=0.3) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * norm.pdf(gamma,loc=0.0,scale=1.0) * \
-							norm.pdf(a1,loc=0.0,scale=2.0) * \
+			if self.m_model == 'power':
+				prior = norm.pdf(log_k,loc=2.0,scale=0.3) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * norm.pdf(gamma,loc=0.0,scale=2.0) * \
+							truncnorm.pdf(c0,0.0,1.0/self.mass_range,loc=0.0,scale=0.1/self.mass_range) * truncnorm.pdf(c1,-c0/self.mass_range,c0/self.mass_range,loc=0.0,scale=0.5*c0/self.mass_range) 
+
+			else:
+				prior = norm.pdf(b1,loc=0.0,scale=2.0) * norm.pdf(b2,loc=0.0,scale=2.0) * norm.pdf(b3,loc=0.0,scale=2.0) * norm.pdf(b4,loc=0.0,scale=2.0)
+
+
+			prior *= truncnorm.pdf(fo, 0.0, self.scale_fo*6, loc=0.0, scale=self.scale_fo) * norm.pdf(a1,loc=0.0,scale=2.0) * \
 							norm.pdf(a2,loc=0.0,scale=2.0) * norm.pdf(a3,loc=0.0,scale=2.0) *  \
 							norm.pdf(a1_dot,loc=0.0,scale=0.1/self.delta_M) * \
 							norm.pdf(a2_dot,loc=0.0,scale=0.1/self.delta_M) * norm.pdf(a3_dot,loc=0.0,scale=0.1/self.delta_M) * \
@@ -1207,6 +1387,8 @@ class CMDFitter():
 
 		assert self.q_model in ['power','legendre']
 
+		assert self.m_model in ['power','legendre']
+
 		x = self.default_params.copy()
 
 		if self.q_model == 'power':
@@ -1216,54 +1398,84 @@ class CMDFitter():
 
 			i = 0
 
-			if not self.freeze[0]:
-				# log k
-				x[0] = norm.ppf(u[i], loc=2.0, scale=0.3)
-				i += 1
-			if not self.freeze[1]:
-				# M0
-				x[1] = norm.ppf(u[i], loc=0.55, scale=0.01)
-				i += 1
-			if not self.freeze[2]:
-				# gamma
-				x[2] = norm.ppf(u[i], loc=0.0, scale=1.0)
-				i += 1
+			if self.m_model == 'power':
 
-			if not self.freeze[3]:
+				if not self.freeze[0]:
+					# log k
+					x[0] = norm.ppf(u[i], loc=2.0, scale=0.3)
+					i += 1
+				if not self.freeze[1]:
+					# M0
+					x[1] = norm.ppf(u[i], loc=self.mass_slice[0]+0.1,scale=0.1)
+					i += 1
+				if not self.freeze[2]:
+					# gamma
+					x[2] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[3]:
+					# c0
+					x[3] = truncnorm.ppf(u[i],0.0,1.0/self.mass_range,loc=0.0,scale=0.1/self.mass_range)
+					i += 1
+				if not self.freeze[4]:
+					# c1
+					x[4] = truncnorm.ppf(u[i],-x[3]/self.mass_range,x[3]/self.mass_range,loc=0.0,scale=0.5*x[3]/self.mass_range)
+					i += 1
+
+			else:
+
+				if not self.freeze[0]:
+					# b1
+					x[0] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[1]:
+					# b2
+					x[1] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[2]:
+					# b3
+					x[2] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[3]:
+					# b4
+					x[3] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+
+
+			if not self.freeze[self.q_index]:
 				# beta
-				x[3] = norm.ppf(u[i], loc=0.0, scale=2.0)
+				x[self.q_index] = norm.ppf(u[i], loc=0.0, scale=2.0)
 				i += 1
-			if not self.freeze[4]:
+			if not self.freeze[self.q_index+1]:
 				# alpha + beta * delta M
 				abm = truncnorm.ppf(u[i], 0.0, 20.0, loc=0.0, scale=3.0)
-				x[4] = abm - np.abs(x[3])*self.delta_M
+				x[self.q_index+1] = abm - np.abs(x[self.q_index])*self.delta_M
 				i += 1
-			if not self.freeze[5]:
+			if not self.freeze[self.q_index+2]:
 				# B
-				x[5] = (1.0 + 1.0/(x[4]+x[3]*self.delta_M))*u[i]
+				x[self.q_index+2] = (1.0 + 1.0/(x[self.q_index+1]+x[self.q_index]*self.delta_M))*u[i]
 				i += 1
 
-			if not self.freeze[6]:
+			if not self.freeze[self.q_index+3]:
 				# fB0
-				x[6] = 0.93*u[i] + 0.02
+				x[self.q_index+3] = 0.93*u[i] + 0.02
 				i += 1
-			if not self.freeze[7]:
+			if not self.freeze[self.q_index+4]:
 				# fB1
-				[x7] = truncnorm.ppf(u[i], (x[6]-0.02)/(self.mass_slice[0]-self.mass_slice[1]), (x[6]-0.95)/(self.mass_slice[0]-self.mass_slice[1]), loc=0.0, scale=0.3)
+				x[self.q_index+4] = truncnorm.ppf(u[i], (x[self.q_index+3]-0.95)/self.mass_range, (x[self.q_index+3]-0.02)/self.mass_range, loc=0.0, scale=0.3)
 				i += 1
-			if not self.freeze[8]:
+			if not self.freeze[self.q_index+5]:
 				# f_O
-				x[8] = 0.1*u[i]
+				x[self.q_index+5] = truncnorm.ppf(u[i], 0.0, self.scale_fo*6, loc=0.0, scale=self.scale_fo)
 				i += 1
 
-			if not self.freeze[9]:
+			if not self.freeze[self.q_index+6]:
 				# log h0
 				logh = norm.ppf(u[i], loc=0.1, scale=0.3)
-				x[9] = 10.0**logh
+				x[self.q_index+6] = 10.0**logh
 				i += 1
-			if not self.freeze[10]:
+			if not self.freeze[self.q_index+7]:
 				# h1
-				x[10] = truncnorm.ppf(u[i], 0.0, 2.0*x[9], loc=0.0, scale=0.4*x[9])
+				x[self.q_index+7] = truncnorm.ppf(u[i], 0.0, 2.0*x[self.q_index+6], loc=0.0, scale=0.4*x[self.q_index+6])
 				i += 1
 
 		if self.q_model == 'legendre':
@@ -1273,66 +1485,96 @@ class CMDFitter():
 
 			i = 0
 
-			if not self.freeze[0]:
-				# log k
-				x[0] = norm.ppf(u[i], loc=2.0, scale=0.3)
-				i += 1
-			if not self.freeze[1]:
-				# M0
-				x[1] = norm.ppf(u[i], loc=self.mass_slice[0]+0.5*self.delta_M, scale=0.5*self.delta_M)
-				i += 1
-			if not self.freeze[2]:
-				# gamma
-				x[2] = norm.ppf(u[i], loc=0.0, scale=1.0)
-				i += 1
+			if self.m_model == 'power':
 
-			if not self.freeze[3]:
+				if not self.freeze[0]:
+					# log k
+					x[0] = norm.ppf(u[i], loc=2.0, scale=0.3)
+					i += 1
+				if not self.freeze[1]:
+					# M0
+					x[1] = norm.ppf(u[i], loc=self.mass_slice[0]+0.1,scale=0.1)
+					i += 1
+				if not self.freeze[2]:
+					# gamma
+					x[2] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[3]:
+					# c0
+					x[3] = truncnorm.ppf(u[i],0.0,1.0/self.mass_range,loc=0.0,scale=0.1/self.mass_range)
+					i += 1
+				if not self.freeze[4]:
+					# c1
+					x[4] = truncnorm.ppf(u[i],-x[3]/self.mass_range,x[3]/self.mass_range,loc=0.0,scale=0.5*x[3]/self.mass_range)
+					i += 1
+
+			else:
+
+				if not self.freeze[0]:
+					# b1
+					x[0] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[1]:
+					# b2
+					x[1] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[2]:
+					# b3
+					x[2] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[3]:
+					# b4
+					x[3] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+
+
+			if not self.freeze[self.q_index]:
 				# a1
-				x[3] = norm.ppf(u[i], loc=0.0, scale=2.0)
+				x[self.q_index] = norm.ppf(u[i], loc=0.0, scale=2.0)
 				i += 1
-			if not self.freeze[4]:
+			if not self.freeze[self.q_index+1]:
 				# a2
-				x[4] = norm.ppf(u[i], loc=0.0, scale=2.0)
+				x[self.q_index+1] = norm.ppf(u[i], loc=0.0, scale=2.0)
 				i += 1
-			if not self.freeze[5]:
+			if not self.freeze[self.q_index+2]:
 				# a3
-				x[5] = norm.ppf(u[i], loc=0.0, scale=2.0)
+				x[self.q_index+2] = norm.ppf(u[i], loc=0.0, scale=2.0)
 				i += 1
 
-			if not self.freeze[6]:
+			if not self.freeze[self.q_index+3]:
 				# a1
-				x[6] = norm.ppf(u[i], loc=0.0, scale=0.1/self.delta_M)
+				x[self.q_index+3] = norm.ppf(u[i], loc=0.0, scale=0.1/self.delta_M)
 				i += 1
-			if not self.freeze[7]:
+			if not self.freeze[self.q_index+4]:
 				# a2
-				x[7] = norm.ppf(u[i], loc=0.0, scale=0.1/self.delta_M)
+				x[self.q_index+4] = norm.ppf(u[i], loc=0.0, scale=0.1/self.delta_M)
 				i += 1
-			if not self.freeze[8]:
+			if not self.freeze[self.q_index+5]:
 				# a3
-				x[8] = norm.ppf(u[i], loc=0.0, scale=0.1/self.delta_M)
+				x[self.q_index+5] = norm.ppf(u[i], loc=0.0, scale=0.1/self.delta_M)
 				i += 1
 
-			if not self.freeze[9]:
+			if not self.freeze[self.q_index+6]:
 				# f_B0
-				x[9] = 0.93*u[i] + 0.02
+				x[self.q_index+6] = 0.93*u[i] + 0.02
 				i += 1
-			if not self.freeze[10]:
+			if not self.freeze[self.q_index+7]:
 				# fB1
-				x[10] = truncnorm.ppf(u[i], (x[9]-0.02)/(self.mass_slice[0]-self.mass_slice[1]), (x[9]-0.95)/(self.mass_slice[0]-self.mass_slice[1]), loc=0.0, scale=0.3)
+				x[self.q_index+7] = truncnorm.ppf(u[i], (x[self.q_index+6]-0.95)/self.mass_range, (x[self.q_index+6]-0.02)/self.mass_range, loc=0.0, scale=0.3)
 				i += 1
-			if not self.freeze[11]:
+			if not self.freeze[self.q_index+8]:
 				# f_O
-				x[11] = 0.1*u[i]
+				x[self.q_index+8] = truncnorm.ppf(u[i], 0.0, self.scale_fo*6, loc=0.0, scale=self.scale_fo)
 				i += 1
 
-			if not self.freeze[12]:
+			if not self.freeze[self.q_index+9]:
 				# log h0
 				logh = norm.ppf(u[i], loc=0.1, scale=0.3)
-				x[12] = 10.0**logh
+				x[self.q_index+9] = 10.0**logh
 				i += 1
-			if not self.freeze[13]:
+			if not self.freeze[self.q_index+10]:
 				# h1
-				x[13] = truncnorm.ppf(u[i], 0.0, 2.0, loc=0.0, scale=0.4*x[12])
+				x[self.q_index+10] = truncnorm.ppf(u[i], 0.0, 2.0, loc=0.0, scale=0.4*x[self.q_index+9])
 				i += 1
 
 		y = x[self.freeze==0]
@@ -1458,6 +1700,7 @@ class CMDFitter():
 			plt.savefig(prefix+'summary.png')
 		except:
 			print('dyplot.runplot failed')
+			pass
 
 		try:
 			fig, axes = dyplot.traceplot(res, show_titles=True,trace_cmap='viridis',
@@ -1465,6 +1708,7 @@ class CMDFitter():
 			plt.savefig(prefix+'trace.png')
 		except:
 			print('dyplot.traceplot failed')
+			pass
 
 
 		try:
@@ -1475,6 +1719,7 @@ class CMDFitter():
 			plt.savefig(prefix+'corner.png')
 		except:
 			print('dyplot.cornerplot failed')
+			pass
 
 		if jitter:
 
