@@ -290,10 +290,10 @@ class Isochrone():
 		ind = np.argsort(self.magnitude[pts])
 		self.mag_M_interp = PchipInterpolator(self.magnitude[pts][ind],iso_M[pts][ind])
 
-		iso_M_increasing = iso_M[pts]+1e-6*np.arange(len(pts))
-		self.M_mag_interp = PchipInterpolator(iso_M_increasing,self.magnitude[pts])
-		self.M_red_interp = PchipInterpolator(iso_M_increasing,iso_red[pts])
-		self.M_blue_interp = PchipInterpolator(iso_M_increasing,iso_blue[pts])
+		iso_M_increasing = np.hstack((0.0,iso_M[pts]+1e-6*np.arange(len(pts))))
+		self.M_mag_interp = PchipInterpolator(iso_M_increasing,np.hstack((40.0,self.magnitude[pts])))
+		self.M_red_interp = PchipInterpolator(iso_M_increasing,np.hstack((40.0,iso_red[pts])))
+		self.M_blue_interp = PchipInterpolator(iso_M_increasing,np.hstack((40.0,iso_blue[pts])))
 
 		colour = self.colour[pts]+self.colour_correction(self.magnitude[pts])
 		ind = np.argsort(colour)
@@ -710,7 +710,7 @@ class PlotUtils():
 		return ax
 
 
-	def plot_realisation(fitter,params,plot_file='realisation.png',outliers=True):
+	def plot_realisation(fitter,params,plot_file='realisation.png',outliers=True,scatter=True):
 
 		"""Plot the data CMD and 3 comparative random realisations of the model implied by params."""
 
@@ -734,7 +734,7 @@ class PlotUtils():
 
 		for i in range(1,4):
 
-			mag, colour, star_type = fitter.model_realisation(params,n,add_observational_scatter=True,outliers=outliers)
+			mag, colour, star_type = fitter.model_realisation(params,n,add_observational_scatter=scatter,outliers=outliers)
 			ax[i].scatter(colour[star_type==0],mag[star_type==0],s=0.5,color='b')
 			ax[i].scatter(colour[star_type==1],mag[star_type==1],s=0.5,color='r')
 			ax[i].scatter(colour[star_type==2],mag[star_type==2],s=0.5,color='k')
@@ -750,6 +750,8 @@ class PlotUtils():
 		plt.tight_layout()
 
 		plt.savefig(plot_file)
+
+		plt.close()
 
 
 
@@ -842,7 +844,7 @@ class CMDFitter():
 
 		self.neginf = -np.inf
 
-		self.scale_fo = 0.02
+		self.scale_fo = 0.001
 
 
 		# Exit now if no input provided
@@ -980,10 +982,11 @@ class CMDFitter():
 			log_k,x0,gamma,c0, c1 = params
 			k = 10.0**log_k
 			m = np.linspace(self.mass_slice[0],self.mass_slice[1],1000)
-			y = (c0 + c1*(m-self.mass_slice[0]) + m**(-gamma) )/ (1.0 + np.exp(-k*(m-x0)) )
+			c_scale = self.mass_slice[0]**(-gamma)
+			y = ((c0 + c1*(m-self.mass_slice[0]))*c_scale + m**(-gamma) )/ (1.0 + np.exp(-k*(m-x0)) )
 			normalM = 1.0 / (np.sum(y)*(m[1]-m[0]))
 
-			y =  normalM * (c0 + c1*(x-self.mass_slice[0]) + x**(-gamma)) / (1.0 + np.exp(-k*(x-x0)))
+			y =  normalM * ((c0 + c1*(x-self.mass_slice[0]))*c_scale + x**(-gamma)) / (1.0 + np.exp(-k*(x-x0)))
 			y[x<self.mass_slice[0]] = 0.0
 			y[x>self.mass_slice[1]] = 0.0
 			return y
@@ -1009,9 +1012,9 @@ class CMDFitter():
 
 		"""Return a function that maps the range (0,1) onto the mass function.""" 
 
-		m = np.linspace(self.mass_slice[0],self.mass_slice[1],1000)
+		m = np.linspace(self.mass_slice[0],self.mass_slice[1],10000)
 
-		y = self.M_distribution(m,params)+np.arange(1000)*1.e-6
+		y = self.M_distribution(m,params)+np.arange(10000)*1.e-8
 		pts = np.where(y>0.0)[0]
 		y_cumulative = np.cumsum(y[pts])/np.sum(y[pts])
 		pts = np.where(y_cumulative>1.e-50)[0]
@@ -1045,6 +1048,7 @@ class CMDFitter():
 
 		y = self.q_distribution(q,params)			
 
+		y[y<0.0] = 0.0
 		y_cumulative = np.cumsum(y)+np.arange(len(y))*1.e-6
 
 		return PchipInterpolator(y_cumulative/y_cumulative[-1],q)
@@ -1156,6 +1160,11 @@ class CMDFitter():
 				z = np.random.multivariate_normal(mean=np.zeros(2), cov=h[i]**2*cov[i], size=1)
 				colour[i] += z[0][0]
 				mag[i] += z[0][1]
+
+
+		print('Model realisation')
+		print('Mass range:',np.min(M1),np.max(M1))
+		print('Magnitude range',np.min(mag),np.max(mag))
 
 		return mag, colour, star_type
 
@@ -1285,8 +1294,12 @@ class CMDFitter():
 				if np.min(q_dist_test) < 0.0:
 					return self.neginf
 
+		try:
+			P_i, PMQ = self.precalc(p)
+		except:
+			print("Error in precalc for p =",p)
+			sys.exit()
 
-		P_i, PMQ = self.precalc(p)
 
 		c_P_i = np.ascontiguousarray(P_i.astype(np.float64))
 		c_PMQ = np.ascontiguousarray(PMQ.astype(np.float64))
@@ -1340,15 +1353,15 @@ class CMDFitter():
 			log_h = np.log10(h0)
 
 			if self.m_model == 'power':
-				prior = norm.pdf(log_k,loc=2.0,scale=0.3) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * norm.pdf(gamma,loc=0.0,scale=2.0) * \
-								truncnorm.pdf(c0,0.0,1.0/self.mass_range,loc=0.0,scale=0.1/self.mass_range) * truncnorm.pdf(c1,-c0/self.mass_range,c0/self.mass_range,loc=0.0,scale=0.5*c0/self.mass_range)
+				prior = norm.pdf(log_k,loc=2.0,scale=0.3) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * truncnorm.pdf(gamma, -2.35, 6.0-2.35, loc=2.35, scale=1.0) * \
+								truncnorm.pdf(c0,0.0,1.0/0.05,loc=0.0,scale=0.05) * truncnorm.pdf(c1,0.0,1.0/0.05,loc=0.0,scale=0.05)
 			else:
 				prior = norm.pdf(b1,loc=0.0,scale=2.0) * norm.pdf(b2,loc=0.0,scale=2.0) * norm.pdf(b3,loc=0.0,scale=2.0) * norm.pdf(b4,loc=0.0,scale=2.0)
 
 
-			prior *= truncnorm.pdf(fo, 0.0, self.scale_fo*6, loc=0.0, scale=self.scale_fo) * norm.pdf(beta,loc=0.0,scale=2.0) * \
-						truncnorm.pdf(alpha + np.abs(beta)*self.delta_M,0.0,20.0,loc=0.0,scale=3.0) * norm.pdf(log_h,loc=0.1,scale=0.3) * \
-						truncnorm.pdf(h1,0.0,2.0,loc=0.0,scale=0.4*h0)
+			prior *= truncnorm.pdf(fo, 0.0, 6.0, loc=0.0, scale=self.scale_fo) * norm.pdf(beta,loc=0.0,scale=2.0) * \
+						truncnorm.pdf((alpha + np.abs(beta)*self.delta_M)/3.0,0.0,20.0,loc=0.0,scale=3.0) * truncnorm.pdf(log_h,-1.0/0.2,1.0/0.2,loc=0.0,scale=0.2) * \
+						truncnorm.pdf(h1,0.0,2.0/(0.4*h0),loc=0.0,scale=0.4*h0)
 
 		if self.q_model == 'legendre':
 
@@ -1365,18 +1378,18 @@ class CMDFitter():
 			log_h = np.log10(h0)
 
 			if self.m_model == 'power':
-				prior = norm.pdf(log_k,loc=2.0,scale=0.3) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * norm.pdf(gamma,loc=0.0,scale=2.0) * \
-							truncnorm.pdf(c0,0.0,1.0/self.mass_range,loc=0.0,scale=0.1/self.mass_range) * truncnorm.pdf(c1,-c0/self.mass_range,c0/self.mass_range,loc=0.0,scale=0.5*c0/self.mass_range) 
+				prior = norm.pdf(log_k,loc=2.0,scale=0.3) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * truncnorm.pdf(gamma, -2.35, 6.0-2.35, loc=2.35, scale=1.0) * \
+							truncnorm.pdf(c0,0.0,1.0/0.05,loc=0.0,scale=0.05) * truncnorm.pdf(c1,0.0,1.0/0.05,loc=0.0,scale=0.05) 
 
 			else:
 				prior = norm.pdf(b1,loc=0.0,scale=2.0) * norm.pdf(b2,loc=0.0,scale=2.0) * norm.pdf(b3,loc=0.0,scale=2.0) * norm.pdf(b4,loc=0.0,scale=2.0)
 
 
-			prior *= truncnorm.pdf(fo, 0.0, self.scale_fo*6, loc=0.0, scale=self.scale_fo) * norm.pdf(a1,loc=0.0,scale=2.0) * \
+			prior *= truncnorm.pdf(fo, 0.0, 6.0, loc=0.0, scale=self.scale_fo) * norm.pdf(a1,loc=0.0,scale=2.0) * \
 							norm.pdf(a2,loc=0.0,scale=2.0) * norm.pdf(a3,loc=0.0,scale=2.0) *  \
 							norm.pdf(a1_dot,loc=0.0,scale=0.1/self.delta_M) * \
 							norm.pdf(a2_dot,loc=0.0,scale=0.1/self.delta_M) * norm.pdf(a3_dot,loc=0.0,scale=0.1/self.delta_M) * \
-							norm.pdf(log_h,loc=0.1,scale=0.3) * truncnorm.pdf(h1,0.0,2.0*h0,loc=0.0,scale=0.4*h0)
+							truncnorm.pdf(log_h,-1.0/0.2,1.0/0.2,loc=0.0,scale=0.2) * truncnorm.pdf(h1,0.0,2.0/(0.4*h0),loc=0.0,scale=0.4*h0)
 
 		return np.log(prior)
 
@@ -1410,15 +1423,15 @@ class CMDFitter():
 					i += 1
 				if not self.freeze[2]:
 					# gamma
-					x[2] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					x[2] = truncnorm.ppf(u[i], -2.35, 6.0-2.35, loc=2.35, scale=1.0)
 					i += 1
 				if not self.freeze[3]:
 					# c0
-					x[3] = truncnorm.ppf(u[i],0.0,1.0/self.mass_range,loc=0.0,scale=0.1/self.mass_range)
+					x[3] = truncnorm.ppf(u[i],0.0,1.0/0.05,loc=0.0,scale=0.05)
 					i += 1
 				if not self.freeze[4]:
 					# c1
-					x[4] = truncnorm.ppf(u[i],-x[3]/self.mass_range,x[3]/self.mass_range,loc=0.0,scale=0.5*x[3]/self.mass_range)
+					x[4] = truncnorm.ppf(u[i],0.0,1.0/0.05,loc=0.0,scale=0.05)
 					i += 1
 
 			else:
@@ -1447,7 +1460,7 @@ class CMDFitter():
 				i += 1
 			if not self.freeze[self.q_index+1]:
 				# alpha + beta * delta M
-				abm = truncnorm.ppf(u[i], 0.0, 20.0, loc=0.0, scale=3.0)
+				abm = truncnorm.ppf(u[i], 0.0, 20.0/3.0, loc=0.0, scale=3.0)
 				x[self.q_index+1] = abm - np.abs(x[self.q_index])*self.delta_M
 				i += 1
 			if not self.freeze[self.q_index+2]:
@@ -1461,27 +1474,28 @@ class CMDFitter():
 				i += 1
 			if not self.freeze[self.q_index+4]:
 				# fB1
-				x[self.q_index+4] = truncnorm.ppf(u[i], (x[self.q_index+3]-0.95)/self.mass_range, (x[self.q_index+3]-0.02)/self.mass_range, loc=0.0, scale=0.3)
+				x[self.q_index+4] = truncnorm.ppf(u[i], (x[self.q_index+3]-0.95)/self.mass_range/0.3, (x[self.q_index+3]-0.02)/self.mass_range/0.3, loc=0.0, scale=0.3)
 				i += 1
 			if not self.freeze[self.q_index+5]:
 				# f_O
-				x[self.q_index+5] = truncnorm.ppf(u[i], 0.0, self.scale_fo*6, loc=0.0, scale=self.scale_fo)
+				x[self.q_index+5] = truncnorm.ppf(u[i], 0.0, 6.0, loc=0.0, scale=self.scale_fo)
 				i += 1
 
 			if not self.freeze[self.q_index+6]:
 				# log h0
-				logh = norm.ppf(u[i], loc=0.1, scale=0.3)
+				logh = truncnorm.ppf(u[i], -1.0/0.2, 1.0/0.2, loc=0.0, scale=0.2)
 				x[self.q_index+6] = 10.0**logh
 				i += 1
 			if not self.freeze[self.q_index+7]:
 				# h1
-				x[self.q_index+7] = truncnorm.ppf(u[i], 0.0, 2.0*x[self.q_index+6], loc=0.0, scale=0.4*x[self.q_index+6])
+				scale = 0.4*x[self.q_index+6]/self.delta_M
+				x[self.q_index+7] = truncnorm.ppf(u[i], 0.0, 2.0*x[self.q_index+6]/scale, loc=0.0, scale=scale)
 				i += 1
 
 		if self.q_model == 'legendre':
 
 
-			# params are log k, M0, gamma, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb, fo, h0, h1
+			# params are log k, M0, gamma, c0, c1, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1
 
 			i = 0
 
@@ -1497,15 +1511,15 @@ class CMDFitter():
 					i += 1
 				if not self.freeze[2]:
 					# gamma
-					x[2] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					x[2] = truncnorm.ppf(u[i], 0.0-2.35, 6.0-2.35, loc=2.35, scale=1.0)
 					i += 1
 				if not self.freeze[3]:
 					# c0
-					x[3] = truncnorm.ppf(u[i],0.0,1.0/self.mass_range,loc=0.0,scale=0.1/self.mass_range)
+					x[3] = truncnorm.ppf(u[i],0.0,1.0/0.05,loc=0.0,scale=0.05)
 					i += 1
 				if not self.freeze[4]:
 					# c1
-					x[4] = truncnorm.ppf(u[i],-x[3]/self.mass_range,x[3]/self.mass_range,loc=0.0,scale=0.5*x[3]/self.mass_range)
+					x[4] = truncnorm.ppf(u[i],0.0,1.0/0.05,loc=0.0,scale=0.05)
 					i += 1
 
 			else:
@@ -1560,21 +1574,22 @@ class CMDFitter():
 				i += 1
 			if not self.freeze[self.q_index+7]:
 				# fB1
-				x[self.q_index+7] = truncnorm.ppf(u[i], (x[self.q_index+6]-0.95)/self.mass_range, (x[self.q_index+6]-0.02)/self.mass_range, loc=0.0, scale=0.3)
+				x[self.q_index+7] = truncnorm.ppf(u[i], (x[self.q_index+6]-0.95)/self.mass_range/0.3, (x[self.q_index+6]-0.02)/self.mass_range/0.3, loc=0.0, scale=0.3)
 				i += 1
 			if not self.freeze[self.q_index+8]:
 				# f_O
-				x[self.q_index+8] = truncnorm.ppf(u[i], 0.0, self.scale_fo*6, loc=0.0, scale=self.scale_fo)
+				x[self.q_index+8] = truncnorm.ppf(u[i], 0.0, 6.0, loc=0.0, scale=self.scale_fo)
 				i += 1
 
 			if not self.freeze[self.q_index+9]:
 				# log h0
-				logh = norm.ppf(u[i], loc=0.1, scale=0.3)
+				logh = truncnorm.ppf(u[i], -0.3/0.1, 0.3/0.1, loc=0.0, scale=0.1)
 				x[self.q_index+9] = 10.0**logh
 				i += 1
 			if not self.freeze[self.q_index+10]:
 				# h1
-				x[self.q_index+10] = truncnorm.ppf(u[i], 0.0, 2.0, loc=0.0, scale=0.4*x[self.q_index+9])
+				scale = 0.4*x[self.q_index+9]/self.delta_M
+				x[self.q_index+10] = truncnorm.ppf(u[i], 0.0/scale, 2.0/scale, loc=0.0, scale=scale)
 				i += 1
 
 		y = x[self.freeze==0]
