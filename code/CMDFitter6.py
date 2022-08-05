@@ -506,8 +506,6 @@ class PlotUtils():
 
 		assert isinstance(fitter,CMDFitter)
 
-		assert fitter.q_model == 'legendre'
-
 		if ax is None:
 			ax = plt.axes()
 
@@ -522,7 +520,7 @@ class PlotUtils():
 			p = fitter.default_params.copy()
 			ind = random.choices(range(ns),k=1,weights=weights)
 			p[np.where(fitter.freeze == 0)] = samples[ind]
-			args = p[3:9].tolist()
+			args = p[fitter.q_index:fitter.b_index].tolist()
 			args.append(fitter.M_ref)
 			ax.plot(q,fitter.q_distribution(q,args),'b-',alpha=0.01)
 
@@ -546,21 +544,19 @@ class PlotUtils():
 
 		assert isinstance(fitter,CMDFitter)
 
-		assert fitter.q_model == 'legendre'
-
 		if ax is None:
+			plt.figure(figsize=(6,4))
 			ax = plt.axes()
 
 		q = np.linspace(0,1,101)
-
 
 		for i in range(n_plot_samples):
 
 			x = np.random.rand(fitter.ndim)
 			p = fitter.prior_transform(x)
-			args = p[4:10].tolist()
+			args = p[fitter.q_index:fitter.b_index].tolist()
 			args.append(fitter.M_ref)
-			ax.plot(q,fitter.q_distribution(q,args),'b-',alpha=0.01)
+			ax.plot(q,fitter.q_distribution(q,args),'-',alpha=np.min([1.0,100.0/n_plot_samples]))
 
 		ax.set_ylim((0,4))
 		ax.set_xlim((0,1))
@@ -581,8 +577,6 @@ class PlotUtils():
 		from statsmodels.stats.weightstats import DescrStatsW
 
 		assert isinstance(fitter, CMDFitter)
-
-		assert fitter.q_model == 'legendre'
 
 		if ax is None:
 			ax = plt.axes()
@@ -606,10 +600,14 @@ class PlotUtils():
 
 				p = fitter.default_params.copy()
 				p[fitter.freeze == 0] = samples[i]
-				y[i] = p[-5] * ((1.0  - fitter.int_sl_0(q[j])) + \
-						p[4]*(0.0 - fitter.int_sl_1(q[j])) + \
-						p[5]*(0.0 - fitter.int_sl_2(q[j])) + \
-						p[6]*(0.0 - fitter.int_sl_3(q[j])) )
+
+				y[i] = p[fitter.b_index] * fitter.q_distribution_integral(p[fitter.q_index:fitter.b_index],q[j],1.0)
+
+
+				# y[i] = p[-5] * ((1.0  - fitter.int_sl_0(q[j])) + \
+				# 		p[4]*(0.0 - fitter.int_sl_1(q[j])) + \
+				# 		p[5]*(0.0 - fitter.int_sl_2(q[j])) + \
+				# 		p[6]*(0.0 - fitter.int_sl_3(q[j])) )
 
 			wq  = DescrStatsW(data=y,weights=weights)
 			qq = wq.quantile(probs=np.array(0.01*np.array([50.0-sig2,50.0-sig1,50.0,50.0+sig1,50.0+sig2])),\
@@ -789,30 +787,32 @@ class CMDFitter():
 
 		self.version = 6.0
 
-		self.citation = "Albrow, M.D., Ulusele, I.H., 2022, MNRAS, submitted"
+		self.citation = "Albrow, M.D., Ulusele, I.H., 2022, MNRAS, 515, 730"
 
 
 		assert q_model in ['power','legendre']
 		assert m_model in ['power','legendre']
 
 		if q_model == 'power':
-			self.ndim = 13
-			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$c_1$", r"$\beta$", r"$\alpha$", r"$B$", r"$f_B$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.2,0.55,0.0,0.0,0.0,   0.0,1.0,0.0,  0.35,0.0,0.01,  1.0,0.00])
+			self.ndim = 14
+			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$\alpha_1$",  r"$\alpha_2$", r"$a_1$", r"$a_2$", r"$f_B$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
+			self.default_params = np.array([2.4,              0.55,     0.0006,       0.0,       0.0,             0.0,           0.0,          1.0,      1.0,      0.35,     0.0,        0.01,     1.0,      0.00])
 			self.q_index = 5
+			self.b_index = 9
 
 		if q_model == 'legendre':
 			self.ndim = 16
-			self.labels = [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$c_1$",  r"$a_1$", r"$a_2$", r"$a_3$", \
-						r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$", r"$f_B,0$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.4,0.55,0.006,0.0,0.0,   0.0,0.0,0.0, 0.0,0.0,0.0, 0.35,0.0, 0.001, 1.0,0.0])
+			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$a_1$", r"$a_2$", r"$a_3$", r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$", r"$f_B,0$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
+			self.default_params = np.array([2.4,              0.55,     0.0006,       0.0,       0.0,             0.0,      0.0,      0.0,      0.0,            0.0,            0.0,            0.35,       0.0,        0.01,     1.0,      0.00])
 			self.q_index = 5
+			self.b_index = 11
 
 		if m_model == 'legendre':
-			self.labels[4] = [r"$b_1$", r"$b_2$", r"$b_3$", r"$b_4$"]
-			self.default_params[:4] = np.array([0.0,0.0,0.0,0.0])
+			self.labels[4] =                              [r"$b_1$", r"$b_2$", r"$b_3$", r"$b_4$"] + self.labels[self.q_index:]
+			self.default_params[:4] = np.hstack((np.array([0.0,      0.0,      0.0,      0.0]),self.default_params[self.q_index:]))
 			self.ndim -= 1
-			self.q_index = 4
+			self.q_index -= 1
+			self.b_index -= 1
 
 		self.freeze = np.zeros(self.ndim)
 		self.prefix = 'out_'
@@ -982,7 +982,7 @@ class CMDFitter():
 			log_k,x0,gamma,c0, c1 = params
 			k = 10.0**log_k
 			m = np.linspace(self.mass_slice[0],self.mass_slice[1],1000)
-			c_scale = self.mass_slice[0]**(-gamma)
+			c_scale = np.max([self.mass_slice[0],x0])**(-gamma)
 			y = ((c0 + c1*(m-self.mass_slice[0]))*c_scale + m**(-gamma) )/ (1.0 + np.exp(-k*(m-x0)) )
 			normalM = 1.0 / (np.sum(y)*(m[1]-m[0]))
 
@@ -1028,9 +1028,42 @@ class CMDFitter():
 		assert self.q_model in ['power','legendre']
 
 		if self.q_model == 'power':
-			beta,alpha,B,M = params
-			power = alpha + beta*(M-self.M_ref)
-			return (alpha + beta*(M-self.M_ref) + 1.0)*(1.0-B)*x**power + B
+			alpha1, alpha2, a1, a2, M = params
+			xarr = np.atleast_1d(x)
+			qdist = np.zeros_like(xarr)
+
+			c = 1.0 - a1*0.5**alpha1/(2*(alpha1+1.0)) - a2*0.5**alpha2/(2*(alpha2+1.0))
+			
+			qdist[xarr<0.5] = c + a1*(0.5 - xarr[xarr<0.5])**alpha1
+			qdist[xarr>=0.5] = c + a2*(xarr[xarr>=0.5] - 0.5)**alpha2
+
+			#a2min = (a1*0.5**(alpha1+1.0)/(alpha1+1.0) -1.0) / (0.5**alpha2*(1.0-1.0/(2.0*(alpha2+1.0))))
+			#a2max = (1.0 + a1*0.5**alpha1*(1.0-1.0/(2*(alpha1+1.0))))*(alpha2+1.0) / 0.5**(alpha2+1.0)
+			a2min = (a1*2.0**(-(alpha1+1.0))/(alpha1+1) - 1.0) * 2**(alpha2+1) * (alpha2+1) / (2.0*alpha2+1.0)
+
+			a2max = np.min([2**(alpha2+1.0)*(alpha2+1.0) * (1.0 - 2**(-(alpha1+1.0))*a1/(alpha1+1.0)), \
+							2**(alpha2+1.0)*(alpha2+1.0) * (1.0 + 2**(-(alpha1+1.0))*a1*(2.0*alpha1 + 1.0) / (alpha1+1.0))   ])
+			a1min = 2.0**(alpha1+2.0)*(alpha1+1.0)*(alpha2+1.0) / (1.0 - (2.0*alpha1+1.0)*(2.0*alpha2 + 1.0))
+
+
+			if np.min(qdist) < 0.0:
+				print('q dist < 0 for ',params)
+				print('c = ',c)
+				print('f(0) =',c + a1*0.5**alpha1)
+				print('f(1) =',c + a2*0.5**alpha2)
+				print('a1min =',a1min)
+				print('a2min, a2max =',a2min,a2max)
+				xarr = np.linspace(0.0,1.0,1001)
+				qdist = np.zeros_like(xarr)
+				qdist[xarr<0.5] = c + a1*(0.5 - xarr[xarr<0.5])**alpha1
+				qdist[xarr>=0.5] = c + a2*(xarr[xarr>=0.5] - 0.5)**alpha2
+				print('integral = ',np.sum(qdist)/1000.0)
+				sys.exit()
+
+			if type(x) == np.ndarray:
+				return qdist
+			else:
+				return qdist[0]
 
 		if self.q_model == 'legendre':
 			a1, a2, a3, a1_dot, a2_dot,a3_dot, M = params
@@ -1052,6 +1085,41 @@ class CMDFitter():
 		y_cumulative = np.cumsum(y)+np.arange(len(y))*1.e-6
 
 		return PchipInterpolator(y_cumulative/y_cumulative[-1],q)
+
+
+	def q_distribution_integral(self,params,q1,q2):
+
+		assert self.q_model in ['power','legendre']
+
+		assert np.min([q1,q2]) >= 0.0
+		assert np.max([q1,q2]) <= 1.0
+		assert q2 >= q1
+
+		if self.q_model == 'legendre':
+
+			y = self.int_sl_0(q2) - self.int_sl_0(q1)
+			y += params[0]*(self.int_sl_1(q2) - self.int_sl_1(q1))
+			y += params[1]*(self.int_sl_2(q2) - self.int_sl_2(q1))
+			y += params[2]*(self.int_sl_3(q2) - self.int_sl_3(q1))
+
+		if self.q_model == 'power':
+
+			alpha1, alpha2, a1, a2 = params
+
+			c = 1.0 - 2.0**(-(alpha1+1.0))/(alpha1+1.0) - 2.0**(-(alpha2+1.0))/(alpha2+1.0)
+
+			y = 0.0
+			if q2 < 0.5:
+				y += 0.5*a1*(2.0*q2-1.0)*(0.5-q2)**alpha1/(alpha1+1.0) + c*q2 + 0.5*a1*0.5**alpha1/(alpha1+1.0)
+			else:
+				y += 0.5*a1*0.5**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q2-1.0)*(q2-0.5)**alpha2/(alpha2+1.0) + c*q2
+			if q1 < 0.5:
+				y -= 0.5*a1*(2.0*q1-1.0)*(0.5-q1)**alpha1/(alpha1+1.0) + c*q1 + 0.5*a1*0.5**alpha1/(alpha1+1.0)
+			else:
+				y -= 0.5*a1*0.5**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q1-1.0)*(q1-0.5)**alpha2/(alpha2+1.0) + c*q1
+
+		return y
+
 
 
 	def compute_observational_scatter(self,mag,nbins=10):
@@ -1092,13 +1160,8 @@ class CMDFitter():
 
 		assert self.q_model in ['power','legendre']
 
-		if self.q_model == 'power':
-			log_k, M0, gamma, c0, c1, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
+		fb0, fb1, fo, h0, h1 = p[self.b_index:]
 
-		if self.q_model == 'legendre':
-			log_k, M0, gamma, c0, c1, a1, a2, a3, a1_dot, a2_dot, a3_dot, fb0, fb1, fo, h0, h1 = p
-
-		
 		star_type = np.zeros(n)
 		mag = np.zeros(n)
 		colour = np.zeros(n)
@@ -1116,8 +1179,6 @@ class CMDFitter():
 
 			colour[:n_outliers] = d[:,0]
 			mag[:n_outliers] = d[:,1]
-			#colour[:n_outliers] = self.outlier_description[0] + self.outlier_description[2]*np.random.randn(n_outliers)
-			#mag[:n_outliers] = self.outlier_description[1] + self.outlier_description[3]*np.random.randn(n_outliers)
 			star_type[:n_outliers] = 2
 
 		else:
@@ -1141,10 +1202,9 @@ class CMDFitter():
 
 				star_type[i] = 1
 
-				if self.q_model == 'power':
-					q_sampler = self.q_distribution_sampler([alpha,beta,B,M1[i]])
-				if self.q_model == 'legendre':
-					q_sampler = self.q_distribution_sampler([a1,a2,a3,a1_dot,a2_dot,a3_dot,M1[i]])
+				args = p[self.q_index:self.b_index].tolist() + [M1[i]]
+
+				q_sampler = self.q_distribution_sampler(args)
 
 				q[i] = q_sampler(np.random.rand())
 			
@@ -1232,37 +1292,31 @@ class CMDFitter():
 
 		assert self.q_model in ['power','legendre']
 
+		fb0, fb1, fo, h0, h1 = params[self.b_index:]
 
-		fb0 = params[-5]
-		fb1 = params[-4]
-		fo = params[-3]
 		fb = fb0 + fb1*(self.mass_slice[1] - self.M0)
 
 		PMQ = np.zeros(self.n_bf**2)
 		Ma = self.M_gauss(params[:self.q_index])
 
-		if (np.abs(params[4]) < 1.e-5) or (self.q_model == 'legendre'):
+		if (self.q_model == 'legendre') and (np.sum(self.freeze[self.q_index+3:self.b_index]) < 3):
 
-			if self.q_model == 'power':
-				args = params[self.q_index:self.q_index+3].tolist()
-				args.append(self.M0[0])
-				qa = self.q_gauss(args)
-			if self.q_model == 'legendre':
-				args = params[self.q_index:self.q_index+6].tolist()
-				args.append(self.M0[0])
-				qa = self.q_gauss(args)
+			# p(q) is a function of mass
 
 			for i in range (self.n_bf):
+				args = params[self.q_index:self.b_index].tolist() + [self.M0[i]]
+				qa = self.q_gauss(args)
 				for j in range(self.n_bf):
 					PMQ[i+j*self.n_bf] = Ma[i]*qa[j]*fb[i]
 
 		else:
 
+			args = params[self.q_index:self.b_index].tolist() + [self.M0[0]]
+			qa = self.q_gauss(args)
 			for i in range (self.n_bf):
-				qa = self.q_gauss(params[self.q_index:self.q_index+3],self.M0[i])
 				for j in range(self.n_bf):
 					PMQ[i+j*self.n_bf] = Ma[i]*qa[j]*fb[i]
-
+	
 		return Ma*(1.0-fb-fo), PMQ
 
 
@@ -1287,11 +1341,14 @@ class CMDFitter():
 
 		if self.q_model == 'legendre':
 
+			qx = np.linspace(0.0,1.0,101)
 			for MM in np.linspace(self.mass_slice[0],self.mass_slice[1],31).tolist():
-				args = p[self.q_index:self.q_index+6].tolist()
-				args.append(MM)
-				q_dist_test = self.q_distribution(np.linspace(0.0,1.0,101),args)
+				args = p[self.q_index:self.b_index].tolist() + [MM]
+				q_dist_test = self.q_distribution(qx,args)
 				if np.min(q_dist_test) < 0.0:
+					with open(self.prefix+'.err', 'a') as f:
+						#f.write('Negative q dist for:')
+						f.write(np.array2string(params,max_line_width=1000).strip('[]\n')+'\n')
 					return self.neginf
 
 		try:
@@ -1341,27 +1398,33 @@ class CMDFitter():
 		if self.q_model == 'power':
 
 			if self.m_model == 'power':
-				log_k, M0, gamma, c0, c1, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
+				log_k, M0, gamma, c0, c1, alpha1, alpha2, a1, a2, fb0, fb1, fo, h0, h1 = p
 			else:
-				b1, b2, b3, b4, beta, alpha, B, fb0, fb1, fo, h0, h1 = p
+				b1, b2, b3, b4, a1, a2, alpha1, alpha2, fb0, fb1, fo, h0, h1 = p
 
 			fb_end = fb0 + fb1*self.mass_range
 
-			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or B < 0.0 or B > (1.0 + 1.0/(alpha+beta*self.delta_M)):
+			a1min = 2.0**(alpha1+2.0)*(alpha1+1.0)*(alpha2+1.0) / (1.0 - (2.0*alpha1+1.0)*(2.0*alpha2 + 1.0))
+			a1max = -a1min
+			a2min = (a1*2.0**(-(alpha1+1.0))/(alpha1+1) - 1.0) * 2**(alpha2+1) * (alpha2+1) / (2.0*alpha2+1.0)
+			a2max = np.min([2**(alpha2+1.0)*(alpha2+1.0) * (1.0 - 2**(-(alpha1+1.0))*a1/(alpha1+1.0)), \
+							2**(alpha2+1.0)*(alpha2+1.0) * (1.0 + 2**(-(alpha1+1.0))*a1*(2.0*alpha1 + 1.0) / (alpha1+1.0)) , a1max  ])
+
+
+			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or alpha1 < 1.0 or alpha1 > 3.0 or alpha2 < 1.0 or alpha2 > 3.0 or a1 < a1min or a1 > a1max or a2 < a2min or a2 > a2max:
 				return self.neginf 
 
 			log_h = np.log10(h0)
 
 			if self.m_model == 'power':
-				prior = norm.pdf(log_k,loc=2.0,scale=0.3) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * truncnorm.pdf(gamma, -2.35, 6.0-2.35, loc=2.35, scale=1.0) * \
+				prior = norm.pdf(log_k,loc=1.7,scale=0.2) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * truncnorm.pdf(gamma, -2.35, 6.0-2.35, loc=2.35, scale=1.0) * \
 								truncnorm.pdf(c0,0.0,1.0/0.05,loc=0.0,scale=0.05) * truncnorm.pdf(c1,0.0,1.0/0.05,loc=0.0,scale=0.05)
 			else:
 				prior = norm.pdf(b1,loc=0.0,scale=2.0) * norm.pdf(b2,loc=0.0,scale=2.0) * norm.pdf(b3,loc=0.0,scale=2.0) * norm.pdf(b4,loc=0.0,scale=2.0)
 
 
-			prior *= truncnorm.pdf(fo, 0.0, 6.0, loc=0.0, scale=self.scale_fo) * norm.pdf(beta,loc=0.0,scale=2.0) * \
-						truncnorm.pdf((alpha + np.abs(beta)*self.delta_M)/3.0,0.0,20.0,loc=0.0,scale=3.0) * truncnorm.pdf(log_h,-1.0/0.2,1.0/0.2,loc=0.0,scale=0.2) * \
-						truncnorm.pdf(h1,0.0,2.0/(0.4*h0),loc=0.0,scale=0.4*h0)
+			prior *= truncnorm.pdf(fo, 0.0, 6.0, loc=0.0, scale=self.scale_fo) * \
+						truncnorm.pdf(log_h,-1.0/0.2,1.0/0.2,loc=0.0,scale=0.2) * truncnorm.pdf(h1,0.0,2.0/(0.4*h0),loc=0.0,scale=0.4*h0)
 
 		if self.q_model == 'legendre':
 
@@ -1372,13 +1435,16 @@ class CMDFitter():
 
 			fb_end = fb0 + fb1*self.mass_range
 
-			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95:
+			a3min = np.max([-a1,(-1.0-0.57735*a1)/19.2376,(-1.0+0.57735*a1)/0.762396,-3.0-a1])
+			a3max = 3.0 - a1
+
+			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or a2 < -1.0 or a2 > 2.0 or a3 < a3min or a3 > a3max:
 				return self.neginf 
 
 			log_h = np.log10(h0)
 
 			if self.m_model == 'power':
-				prior = norm.pdf(log_k,loc=2.0,scale=0.3) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * truncnorm.pdf(gamma, -2.35, 6.0-2.35, loc=2.35, scale=1.0) * \
+				prior = norm.pdf(log_k,loc=1.7,scale=0.2) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * truncnorm.pdf(gamma, -2.35, 6.0-2.35, loc=2.35, scale=1.0) * \
 							truncnorm.pdf(c0,0.0,1.0/0.05,loc=0.0,scale=0.05) * truncnorm.pdf(c1,0.0,1.0/0.05,loc=0.0,scale=0.05) 
 
 			else:
@@ -1386,12 +1452,14 @@ class CMDFitter():
 
 
 			prior *= truncnorm.pdf(fo, 0.0, 6.0, loc=0.0, scale=self.scale_fo) * norm.pdf(a1,loc=0.0,scale=2.0) * \
-							norm.pdf(a2,loc=0.0,scale=2.0) * norm.pdf(a3,loc=0.0,scale=2.0) *  \
 							norm.pdf(a1_dot,loc=0.0,scale=0.1/self.delta_M) * \
 							norm.pdf(a2_dot,loc=0.0,scale=0.1/self.delta_M) * norm.pdf(a3_dot,loc=0.0,scale=0.1/self.delta_M) * \
 							truncnorm.pdf(log_h,-1.0/0.2,1.0/0.2,loc=0.0,scale=0.2) * truncnorm.pdf(h1,0.0,2.0/(0.4*h0),loc=0.0,scale=0.4*h0)
 
 		return np.log(prior)
+
+
+
 
 
 	def prior_transform(self,u):
@@ -1407,7 +1475,7 @@ class CMDFitter():
 		if self.q_model == 'power':
 
 
-			# params are log k, M0, gamma, beta, alpha, B, fb0, fb1, fo, h0, h1
+			# params are log k, M0, gamma, c0, c1,  alpha1, alpha2, a1, a2, fb0, fb1, fo, h0, h1
 
 			i = 0
 
@@ -1415,7 +1483,7 @@ class CMDFitter():
 
 				if not self.freeze[0]:
 					# log k
-					x[0] = norm.ppf(u[i], loc=2.0, scale=0.3)
+					x[0] = norm.ppf(u[i], loc=1.7, scale=0.2)
 					i += 1
 				if not self.freeze[1]:
 					# M0
@@ -1455,41 +1523,57 @@ class CMDFitter():
 
 
 			if not self.freeze[self.q_index]:
-				# beta
-				x[self.q_index] = norm.ppf(u[i], loc=0.0, scale=2.0)
+				# alpha1
+				#x[self.q_index] = truncnorm.ppf(u[i],0.0,10.0/1.0,loc=1.0,scale=1.0)
+				x[self.q_index] = 2.0*u[i] + 1.0
 				i += 1
 			if not self.freeze[self.q_index+1]:
-				# alpha + beta * delta M
-				abm = truncnorm.ppf(u[i], 0.0, 20.0/3.0, loc=0.0, scale=3.0)
-				x[self.q_index+1] = abm - np.abs(x[self.q_index])*self.delta_M
+				# alpha2
+				x[self.q_index+1] = 2.0*u[i] + 1.0
 				i += 1
 			if not self.freeze[self.q_index+2]:
-				# B
-				x[self.q_index+2] = (1.0 + 1.0/(x[self.q_index+1]+x[self.q_index]*self.delta_M))*u[i]
+				# a1
+				alpha1 = x[self.q_index]
+				alpha2 = x[self.q_index+1]
+				a1min = 2.0**(alpha1+2.0)*(alpha1+1.0)*(alpha2+1.0) / (1.0 - (2.0*alpha1+1.0)*(2.0*alpha2 + 1.0))
+				a1max = -a1min
+				x[self.q_index+2] = a1min + (a1max-a1min)*u[i]
 				i += 1
-
 			if not self.freeze[self.q_index+3]:
-				# fB0
-				x[self.q_index+3] = 0.93*u[i] + 0.02
-				i += 1
-			if not self.freeze[self.q_index+4]:
-				# fB1
-				x[self.q_index+4] = truncnorm.ppf(u[i], (x[self.q_index+3]-0.95)/self.mass_range/0.3, (x[self.q_index+3]-0.02)/self.mass_range/0.3, loc=0.0, scale=0.3)
-				i += 1
-			if not self.freeze[self.q_index+5]:
-				# f_O
-				x[self.q_index+5] = truncnorm.ppf(u[i], 0.0, 6.0, loc=0.0, scale=self.scale_fo)
+				# a2
+				a1 = x[self.q_index+2]
+				alpha1 = x[self.q_index]
+				alpha2 = x[self.q_index+1]
+				a2min = (a1*2.0**(-(alpha1+1.0))/(alpha1+1) - 1.0) * 2**(alpha2+1) * (alpha2+1) / (2.0*alpha2+1.0)
+				a2max = np.min([2**(alpha2+1.0)*(alpha2+1.0) * (1.0 - 2**(-(alpha1+1.0))*a1/(alpha1+1.0)), \
+							2**(alpha2+1.0)*(alpha2+1.0) * (1.0 + 2**(-(alpha1+1.0))*a1*(2.0*alpha1 + 1.0) / (alpha1+1.0)) , a1max  ])
+				x[self.q_index+3] = a2min + (a2max-a2min)*u[i]
 				i += 1
 
-			if not self.freeze[self.q_index+6]:
+			if not self.freeze[self.b_index]:
+				# fB0
+				x[self.b_index] = 0.93*u[i] + 0.02
+				i += 1
+			if not self.freeze[self.b_index+1]:
+				# fB1
+				fb1max = np.min([0.1/self.mass_range,(0.95-x[self.b_index])/self.mass_range])
+				fb1min = np.max([-0.1/self.mass_range,-(x[self.b_index]-0.02)/self.mass_range])
+				x[self.b_index+1] = truncnorm.ppf(u[i], fb1min/0.1, fb1max/0.1, loc=0.0, scale=0.1)
+				i += 1
+			if not self.freeze[self.b_index+2]:
+				# f_O
+				x[self.b_index+2] = truncnorm.ppf(u[i], 0.0, 6.0, loc=0.0, scale=self.scale_fo)
+				i += 1
+
+			if not self.freeze[self.b_index+3]:
 				# log h0
 				logh = truncnorm.ppf(u[i], -1.0/0.2, 1.0/0.2, loc=0.0, scale=0.2)
-				x[self.q_index+6] = 10.0**logh
+				x[self.b_index+3] = 10.0**logh
 				i += 1
-			if not self.freeze[self.q_index+7]:
+			if not self.freeze[self.b_index+4]:
 				# h1
-				scale = 0.4*x[self.q_index+6]/self.delta_M
-				x[self.q_index+7] = truncnorm.ppf(u[i], 0.0, 2.0*x[self.q_index+6]/scale, loc=0.0, scale=scale)
+				scale = 0.4*x[self.b_index+3]/self.delta_M
+				x[self.b_index+4] = truncnorm.ppf(u[i], 0.0, 2.0*x[self.b_index+3]/scale, loc=0.0, scale=scale)
 				i += 1
 
 		if self.q_model == 'legendre':
@@ -1503,11 +1587,11 @@ class CMDFitter():
 
 				if not self.freeze[0]:
 					# log k
-					x[0] = norm.ppf(u[i], loc=2.0, scale=0.3)
+					x[0] = norm.ppf(u[i], loc=1.7, scale=0.2)
 					i += 1
 				if not self.freeze[1]:
 					# M0
-					x[1] = norm.ppf(u[i], loc=self.mass_slice[0]+0.1,scale=0.1)
+					x[1] = norm.ppf(u[i], loc=self.mass_slice[0]+0.05,scale=0.1)
 					i += 1
 				if not self.freeze[2]:
 					# gamma
@@ -1543,16 +1627,26 @@ class CMDFitter():
 
 
 			if not self.freeze[self.q_index]:
+
 				# a1
-				x[self.q_index] = norm.ppf(u[i], loc=0.0, scale=2.0)
+				x[self.q_index] = 2.0*u[i] - 1.0
 				i += 1
+
 			if not self.freeze[self.q_index+1]:
 				# a2
-				x[self.q_index+1] = norm.ppf(u[i], loc=0.0, scale=2.0)
+				#x[self.q_index+1] = 2.0*u[i]
+				x[self.q_index+1] = 1.8*u[i]
 				i += 1
+
 			if not self.freeze[self.q_index+2]:
 				# a3
-				x[self.q_index+2] = norm.ppf(u[i], loc=0.0, scale=2.0)
+				t1 = (5.0-np.sqrt(5.0))/10.0
+				t2 = (5.0+np.sqrt(5.0))/10.0
+				tmin = 0.5*(-0.8 - x[self.q_index]*self.sl_1(t1) - x[self.q_index+1]*self.sl_2(t1)) / self.sl_3(t1)
+				tmax = 0.5*(-0.8 - x[self.q_index]*self.sl_1(t2) - x[self.q_index+1]*self.sl_2(t2)) / self.sl_3(t2)
+				a3min = np.max([-1.0-x[self.q_index]-x[self.q_index+1],tmin])
+				a3max = np.min([1.0 - x[self.q_index] + x[self.q_index+1],tmax])
+				x[self.q_index+2] = a3min + (a3max - a3min)*u[i]
 				i += 1
 
 			if not self.freeze[self.q_index+3]:
@@ -1574,7 +1668,9 @@ class CMDFitter():
 				i += 1
 			if not self.freeze[self.q_index+7]:
 				# fB1
-				x[self.q_index+7] = truncnorm.ppf(u[i], (x[self.q_index+6]-0.95)/self.mass_range/0.3, (x[self.q_index+6]-0.02)/self.mass_range/0.3, loc=0.0, scale=0.3)
+				fb1max = np.min([0.1/self.mass_range,(0.95-x[self.q_index+6])/self.mass_range])
+				fb1min = np.max([-0.1/self.mass_range,-(x[self.q_index+6]-0.02)/self.mass_range])
+				x[self.q_index+7] = truncnorm.ppf(u[i], fb1min/0.1, fb1max/0.1, loc=0.0, scale=0.1)
 				i += 1
 			if not self.freeze[self.q_index+8]:
 				# f_O
@@ -1685,7 +1781,7 @@ class CMDFitter():
 		plt.savefig(prefix+'corner.png')
 
 
-	def dynesty_sample(self,prefix='dy_',jitter=False):
+	def dynesty_sample(self,prefix='dy_',jitter=False,bound='multi',sample='rwalk',nlive=2000):
 
 		from dynesty import NestedSampler
 		from dynesty import plotting as dyplot
@@ -1697,7 +1793,7 @@ class CMDFitter():
 
 		labels = [self.labels[i] for i in range(self.ndim) if self.freeze[i] == 0]
 
-		sampler = NestedSampler(self.lnlikelihood, self.prior_transform, ndim)
+		sampler = NestedSampler(self.lnlikelihood, self.prior_transform, ndim,bound=bound,sample=sample,nlive=nlive)
 
 		sampler.run_nested()
 
