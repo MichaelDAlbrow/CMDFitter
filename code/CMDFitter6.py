@@ -794,15 +794,15 @@ class CMDFitter():
 		assert m_model in ['power','legendre']
 
 		if q_model == 'power':
-			self.ndim = 14
-			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$\alpha_1$",  r"$\alpha_2$", r"$a_1$", r"$a_2$", r"$f_B$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.4,              0.55,     0.0006,       0.0,       0.0,             0.0,           0.0,          1.0,      1.0,      0.35,     0.0,        0.01,     1.0,      0.00])
+			self.ndim = 15
+			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$\alpha_1$",  r"$\alpha_2$", r"$q_0$",  r"$a_1$", r"$a_2$", r"$f_B$", r"$\dot{f_B}$", r"$f_O$", r"$h_0$", r"$h_1$"]
+			self.default_params = np.array([2.4,              0.55,     0.0006,       0.0,       0.0,             0.0,           0.0,            0.5,       1.0,      1.0,      0.35,     0.0,        0.01,     1.0,      0.00])
 			self.q_index = 5
-			self.b_index = 9
+			self.b_index = 10
 
 		if q_model == 'legendre':
 			self.ndim = 16
-			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$a_1$", r"$a_2$", r"$a_3$", r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$", r"$f_B,0$", r"$f_B,1$", r"$f_O$", r"$h_0$", r"$h_1$"]
+			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$a_1$", r"$a_2$", r"$a_3$", r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$", r"$f_B,0$", r"\dot{f_B}$", r"$f_O$", r"$h_0$", r"$h_1$"]
 			self.default_params = np.array([2.4,              0.55,     0.0006,       0.0,       0.0,             0.0,      0.0,      0.0,      0.0,            0.0,            0.0,            0.35,       0.0,        0.01,     1.0,      0.00])
 			self.q_index = 5
 			self.b_index = 11
@@ -1028,36 +1028,41 @@ class CMDFitter():
 		assert self.q_model in ['power','legendre']
 
 		if self.q_model == 'power':
-			alpha1, alpha2, a1, a2, M = params
+			alpha1, alpha2, q0, a1, a2, M = params
 			xarr = np.atleast_1d(x)
 			qdist = np.zeros_like(xarr)
 
-			c = 1.0 - a1*0.5**alpha1/(2*(alpha1+1.0)) - a2*0.5**alpha2/(2*(alpha2+1.0))
+			c = 1.0 - a1*q0**(alpha1+1.0)/(alpha1+1.0) - a2*(1.0-q0)**(alpha2+1.0)/(alpha2+1.0)
 			
-			qdist[xarr<0.5] = c + a1*(0.5 - xarr[xarr<0.5])**alpha1
-			qdist[xarr>=0.5] = c + a2*(xarr[xarr>=0.5] - 0.5)**alpha2
-
-			#a2min = (a1*0.5**(alpha1+1.0)/(alpha1+1.0) -1.0) / (0.5**alpha2*(1.0-1.0/(2.0*(alpha2+1.0))))
-			#a2max = (1.0 + a1*0.5**alpha1*(1.0-1.0/(2*(alpha1+1.0))))*(alpha2+1.0) / 0.5**(alpha2+1.0)
-			a2min = (a1*2.0**(-(alpha1+1.0))/(alpha1+1) - 1.0) * 2**(alpha2+1) * (alpha2+1) / (2.0*alpha2+1.0)
-
-			a2max = np.min([2**(alpha2+1.0)*(alpha2+1.0) * (1.0 - 2**(-(alpha1+1.0))*a1/(alpha1+1.0)), \
-							2**(alpha2+1.0)*(alpha2+1.0) * (1.0 + 2**(-(alpha1+1.0))*a1*(2.0*alpha1 + 1.0) / (alpha1+1.0))   ])
-			a1min = 2.0**(alpha1+2.0)*(alpha1+1.0)*(alpha2+1.0) / (1.0 - (2.0*alpha1+1.0)*(2.0*alpha2 + 1.0))
+			qdist[xarr<q0] = c + a1*(q0 - xarr[xarr<q0])**alpha1
+			qdist[xarr>=q0] = c + a2*(xarr[xarr>=q0] - q0)**alpha2
 
 
 			if np.min(qdist) < 0.0:
+				denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
+				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
+				a1min = num/denom
+				a1max = q0**(alpha1+1.0)/(alpha1+1.0)
+				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (q0+alpha2)
+				a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
+							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0))])
 				print('q dist < 0 for ',params)
 				print('c = ',c)
-				print('f(0) =',c + a1*0.5**alpha1)
-				print('f(1) =',c + a2*0.5**alpha2)
+				print('f(0) =',c + a1*q0**alpha1)
+				print('f(1) =',c + a2*(1.0-q0)**alpha2)
+				print('a1 denom =',denom)
+				print('a1 num = ', num)
 				print('a1min =',a1min)
+				print('a1max =',a1max)
 				print('a2min, a2max =',a2min,a2max)
+				print('a2max terms',(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
+							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)))
 				xarr = np.linspace(0.0,1.0,1001)
 				qdist = np.zeros_like(xarr)
-				qdist[xarr<0.5] = c + a1*(0.5 - xarr[xarr<0.5])**alpha1
-				qdist[xarr>=0.5] = c + a2*(xarr[xarr>=0.5] - 0.5)**alpha2
-				print('integral = ',np.sum(qdist)/1000.0)
+				qdist[xarr<q0] = c + a1*(q0 - xarr[xarr<q0])**alpha1
+				qdist[xarr>=q0] = c + a2*(xarr[xarr>=q0] - q0)**alpha2
+				print('integral1 = ',np.sum(qdist)/1001.0)
+				print('integral2 = ',c + a1*q0**(alpha1+1.0)/(alpha1+1.0) +  a2*(1.0-q0)**(alpha2+1.0)/(alpha2+1.0) )
 				sys.exit()
 
 			if type(x) == np.ndarray:
@@ -1104,19 +1109,19 @@ class CMDFitter():
 
 		if self.q_model == 'power':
 
-			alpha1, alpha2, a1, a2 = params
+			alpha1, alpha2, q0, a1, a2 = params
 
-			c = 1.0 - 2.0**(-(alpha1+1.0))/(alpha1+1.0) - 2.0**(-(alpha2+1.0))/(alpha2+1.0)
+			c = 1.0 - a1*q0**alpha1/(2*(alpha1+1.0)) - a2*(1.0-q0)**alpha2/(2*(alpha2+1.0))
 
 			y = 0.0
-			if q2 < 0.5:
-				y += 0.5*a1*(2.0*q2-1.0)*(0.5-q2)**alpha1/(alpha1+1.0) + c*q2 + 0.5*a1*0.5**alpha1/(alpha1+1.0)
+			if q2 < q0:
+				y += 0.5*a1*(2.0*q2-1.0)*(q0-q2)**alpha1/(alpha1+1.0) + c*q2 + 0.5*a1*q0**alpha1/(alpha1+1.0)
 			else:
-				y += 0.5*a1*0.5**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q2-1.0)*(q2-0.5)**alpha2/(alpha2+1.0) + c*q2
-			if q1 < 0.5:
-				y -= 0.5*a1*(2.0*q1-1.0)*(0.5-q1)**alpha1/(alpha1+1.0) + c*q1 + 0.5*a1*0.5**alpha1/(alpha1+1.0)
+				y += 0.5*a1*q0**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q2-1.0)*(q2-q0)**alpha2/(alpha2+1.0) + c*q2
+			if q1 < q0:
+				y -= 0.5*a1*(2.0*q1-1.0)*(q0-q1)**alpha1/(alpha1+1.0) + c*q1 + 0.5*a1*q0**alpha1/(alpha1+1.0)
 			else:
-				y -= 0.5*a1*0.5**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q1-1.0)*(q1-0.5)**alpha2/(alpha2+1.0) + c*q1
+				y -= 0.5*a1*q0**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q1-1.0)*(q1-q0)**alpha2/(alpha2+1.0) + c*q1
 
 		return y
 
@@ -1398,17 +1403,20 @@ class CMDFitter():
 		if self.q_model == 'power':
 
 			if self.m_model == 'power':
-				log_k, M0, gamma, c0, c1, alpha1, alpha2, a1, a2, fb0, fb1, fo, h0, h1 = p
+				log_k, M0, gamma, c0, c1, alpha1, alpha2, q0, a1, a2, fb0, fb1, fo, h0, h1 = p
 			else:
-				b1, b2, b3, b4, a1, a2, alpha1, alpha2, fb0, fb1, fo, h0, h1 = p
+				b1, b2, b3, b4, alpha1, alpha2, q0, a1, a2, fb0, fb1, fo, h0, h1 = p
 
 			fb_end = fb0 + fb1*self.mass_range
 
-			a1min = 2.0**(alpha1+2.0)*(alpha1+1.0)*(alpha2+1.0) / (1.0 - (2.0*alpha1+1.0)*(2.0*alpha2 + 1.0))
-			a1max = -a1min
-			a2min = (a1*2.0**(-(alpha1+1.0))/(alpha1+1) - 1.0) * 2**(alpha2+1) * (alpha2+1) / (2.0*alpha2+1.0)
-			a2max = np.min([2**(alpha2+1.0)*(alpha2+1.0) * (1.0 - 2**(-(alpha1+1.0))*a1/(alpha1+1.0)), \
-							2**(alpha2+1.0)*(alpha2+1.0) * (1.0 + 2**(-(alpha1+1.0))*a1*(2.0*alpha1 + 1.0) / (alpha1+1.0)) , a1max  ])
+			denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
+			num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
+			a1min = num/denom
+			a1max = q0**(alpha1+1.0)/(alpha1+1.0)
+
+			a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (q0+alpha2)
+			a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
+						(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0))])
 
 
 			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or alpha1 < 1.0 or alpha1 > 3.0 or alpha2 < 1.0 or alpha2 > 3.0 or a1 < a1min or a1 > a1max or a2 < a2min or a2 > a2max:
@@ -1532,22 +1540,33 @@ class CMDFitter():
 				x[self.q_index+1] = 2.0*u[i] + 1.0
 				i += 1
 			if not self.freeze[self.q_index+2]:
+				# q0
+				x[self.q_index+2] = u[i]
+				i += 1
+			if not self.freeze[self.q_index+3]:
 				# a1
 				alpha1 = x[self.q_index]
 				alpha2 = x[self.q_index+1]
-				a1min = 2.0**(alpha1+2.0)*(alpha1+1.0)*(alpha2+1.0) / (1.0 - (2.0*alpha1+1.0)*(2.0*alpha2 + 1.0))
-				a1max = -a1min
-				x[self.q_index+2] = a1min + (a1max-a1min)*u[i]
+				q0 = x[self.q_index+2]
+				denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
+				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
+				a1min = num/denom
+				a1max = q0**(alpha1+1.0)/(alpha1+1.0)
+				x[self.q_index+3] = a1min + (a1max-a1min)*u[i]
 				i += 1
-			if not self.freeze[self.q_index+3]:
+			if not self.freeze[self.q_index+4]:
 				# a2
-				a1 = x[self.q_index+2]
+				a1 = x[self.q_index+3]
 				alpha1 = x[self.q_index]
 				alpha2 = x[self.q_index+1]
-				a2min = (a1*2.0**(-(alpha1+1.0))/(alpha1+1) - 1.0) * 2**(alpha2+1) * (alpha2+1) / (2.0*alpha2+1.0)
-				a2max = np.min([2**(alpha2+1.0)*(alpha2+1.0) * (1.0 - 2**(-(alpha1+1.0))*a1/(alpha1+1.0)), \
-							2**(alpha2+1.0)*(alpha2+1.0) * (1.0 + 2**(-(alpha1+1.0))*a1*(2.0*alpha1 + 1.0) / (alpha1+1.0)) , a1max  ])
-				x[self.q_index+3] = a2min + (a2max-a2min)*u[i]
+				q0 = x[self.q_index+2]
+
+				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (q0+alpha2)
+				a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
+							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0))])
+				x[self.q_index+4] = a2min + (a2max-a2min)*u[i]
+				#c = 1.0 -  a1*q0**alpha1/(2.0*(alpha1+1.0)) + a2min*(1.0-q0)**alpha2/(2.0*(alpha2+1.0))
+				#print('alpha1, alpha2, q0, c, a1, a2min, f0, f1',alpha1,alpha2, q0, c,a1,a2min,c + a1*q0**alpha1, c + a2min*(1.0-q0)**alpha2)
 				i += 1
 
 			if not self.freeze[self.b_index]:
