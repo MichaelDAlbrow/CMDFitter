@@ -198,8 +198,8 @@ __device__ void single_likelihood(double h, double *Dk, double Sk[2][2], double 
 
 		lnp[threadIdx.x] = logaddexp(lnp[threadIdx.x],-0.5*DSD + log(PM[i]) - 0.5*log(detS));
 
-		//printf("i, Dk, DMQ, D0, Sk, DSD, lnp: %d %f  %f %f %f %f %f %f %f %f %f %f %f\\n",i,Dk[0],Dk[1],tex2D(DMQ,i,0),tex2D(DMQ,i,1),D[0], D[1], Sk[0][0], Sk[0][1],Sk[1][0],Sk[1][1],DSD, lnp[threadIdx.x]);
-		//printf("i, Dk, DMQ, D0, DSD, lnp: %d %f  %f %f %f %f %f %f %f\\n",i,Dk[0],Dk[1],tex2D(DMQ,i,0),tex2D(DMQ,i,1),D[0], D[1], DSD, lnp[threadIdx.x]);
+		//printf("k, i, Dk, DMQ, D0, Sk, DSD, lnp: %d %d %f  %f %f %f %f %f %f %f %f %f %f %f\\n",blockIdx.x,i,Dk[0],Dk[1],tex2D(DMQ,i,0),tex2D(DMQ,i,1),D[0], D[1], Sk[0][0], Sk[0][1],Sk[1][0],Sk[1][1],DSD, lnp[threadIdx.x]);
+		//printf("i, Dk, DMQ, D0, DSD, lnp: %d %f  %f %f %f %f %f %f %f\\n",blockIdx.x,i,Dk[0],Dk[1],tex2D(DMQ,i,0),tex2D(DMQ,i,1),D[0], D[1], DSD, lnp[threadIdx.x]);
 		//printf("i, DMQ: %d, %f %f \\n",i,tex2D(DMQ,i,0),tex2D(DMQ,i,1));
 		//printf("i, SMQ: %d %f %f \\n",i, tex2D(SMQ,i,0),tex2D(SMQ,i,1),tex2D(SMQ,i,2),tex2D(SMQ,i,3));
 
@@ -319,6 +319,9 @@ __global__ void likelihood(double *PM_single, double *PMQ_binary, double *outlie
     if (threadIdx.x == 0) {
 		lnp_k[k] = logaddexp(l_outlier,l_single);
 		lnp_k[k] = logaddexp(lnp_k[k],l_binary);
+		lnp_k[k+gridDim.x] = l_single;
+		lnp_k[k+2*gridDim.x] = l_binary;
+		lnp_k[k+3*gridDim.x] = l_outlier;
 	}
 
  	__syncthreads();

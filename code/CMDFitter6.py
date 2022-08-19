@@ -463,6 +463,7 @@ class PlotUtils():
 		assert isinstance(fitter,CMDFitter)
 
 		if ax is None:
+			plt.figure(figsize=(6,4))
 			ax = plt.axes()
 
 		m = np.linspace(fitter.mass_slice[0],fitter.mass_slice[1],1001)
@@ -507,6 +508,7 @@ class PlotUtils():
 		assert isinstance(fitter,CMDFitter)
 
 		if ax is None:
+			plt.figure(figsize=(6,4))
 			ax = plt.axes()
 
 		q = np.linspace(0,1,101)
@@ -548,15 +550,20 @@ class PlotUtils():
 			plt.figure(figsize=(6,4))
 			ax = plt.axes()
 
+		p = fitter.default_params.copy()
+
 		q = np.linspace(0,1,101)
+
+		nfreeze = int(np.sum(fitter.freeze))
 
 		for i in range(n_plot_samples):
 
-			x = np.random.rand(fitter.ndim)
-			p = fitter.prior_transform(x)
+			x = np.random.rand(fitter.ndim-nfreeze)
+			pt = fitter.prior_transform(x)
+			p[np.where(fitter.freeze == 0)[0]] = pt
 			args = p[fitter.q_index:fitter.b_index].tolist()
 			args.append(fitter.M_ref)
-			ax.plot(q,fitter.q_distribution(q,args),'-',alpha=np.min([1.0,100.0/n_plot_samples]))
+			ax.plot(q,fitter.q_distribution(q,args),'b-',alpha=np.min([1.0,100.0/n_plot_samples]))
 
 		ax.set_ylim((0,4))
 		ax.set_xlim((0,1))
@@ -579,6 +586,7 @@ class PlotUtils():
 		assert isinstance(fitter, CMDFitter)
 
 		if ax is None:
+			plt.figure(figsize=(6,4))
 			ax = plt.axes()
 
 		q = np.linspace(0,1,101)
@@ -602,12 +610,6 @@ class PlotUtils():
 				p[fitter.freeze == 0] = samples[i]
 
 				y[i] = p[fitter.b_index] * fitter.q_distribution_integral(p[fitter.q_index:fitter.b_index],q[j],1.0)
-
-
-				# y[i] = p[-5] * ((1.0  - fitter.int_sl_0(q[j])) + \
-				# 		p[4]*(0.0 - fitter.int_sl_1(q[j])) + \
-				# 		p[5]*(0.0 - fitter.int_sl_2(q[j])) + \
-				# 		p[6]*(0.0 - fitter.int_sl_3(q[j])) )
 
 			wq  = DescrStatsW(data=y,weights=weights)
 			qq = wq.quantile(probs=np.array(0.01*np.array([50.0-sig2,50.0-sig1,50.0,50.0+sig1,50.0+sig2])),\
@@ -650,6 +652,7 @@ class PlotUtils():
 		assert fitter.q_model == 'legendre'
 
 		if ax is None:
+			plt.figure(figsize=(6,4))
 			ax = plt.axes()
 
 		q = np.linspace(0,1,101)
@@ -796,7 +799,7 @@ class CMDFitter():
 		if q_model == 'power':
 			self.ndim = 15
 			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$\alpha_1$",  r"$\alpha_2$", r"$q_0$",  r"$a_1$", r"$a_2$", r"$f_B$", r"$\dot{f_B}$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.4,              0.55,     0.0006,       0.0,       0.0,             0.0,           0.0,            0.5,       1.0,      1.0,      0.35,     0.0,        0.01,     1.0,      0.00])
+			self.default_params = np.array([2.4,              0.55,     0.0006,       0.0,       0.0,             2.0,           2.0,            0.5,       1.0,      1.0,      0.35,     0.0,        0.01,     1.0,      0.00])
 			self.q_index = 5
 			self.b_index = 10
 
@@ -903,14 +906,19 @@ class CMDFitter():
 
 		self.n_bf = 50
 
-		self.Mw = 0.01
-		self.M0 = np.linspace(self.mass_slice[0]-0.2,self.mass_slice[1]-(self.Mw/2),self.n_bf)
-		self.qw = 0.012
-		self.q0 = np.linspace(self.qw*2,1,self.n_bf)
+		#self.Mw = 0.01
+		self.Mw = 0.8*self.mass_range / self.n_bf
+		#self.M0 = np.linspace(self.mass_slice[0]-0.2,self.mass_slice[1]-(self.Mw/2),self.n_bf)
+		self.M0 = np.linspace(self.mass_slice[0],self.mass_slice[1],self.n_bf)
+
+
+		#self.qw = 0.012
+		self.qw = 0.8*1.0/self.n_bf
+		self.q0 = np.linspace(0.0,1.0,self.n_bf)
 
 		self.qsigma = 0.0001
-		self.qx = np.linspace(0.001,1,200)
-		self.qbf = np.zeros([self.n_bf,200])
+		self.qx = np.linspace(0.001,1,500)
+		self.qbf = np.zeros([self.n_bf,500])
 		for i in range(self.n_bf):
 			self.qbf[i,:] = (1/(self.qw*(2*np.pi)**0.5))*np.exp(-((self.qx-self.q0[i])**2)/(2*self.qw**2)) 
 
@@ -923,9 +931,10 @@ class CMDFitter():
 		self.qAA = np.dot(self.qAT,self.qA)
 
 		self.Msigma = 0.0001
-		self.Mx = np.linspace(0.1,1.1,200)
+		#self.Mx = np.linspace(0.1,1.1,200)
+		self.Mx = np.linspace(self.mass_slice[0],self.mass_slice[1],500)
 
-		self.Mbf = np.zeros([self.n_bf,200])
+		self.Mbf = np.zeros([self.n_bf,500])
 		for i in range(self.n_bf):
 			self.Mbf[i,:] = (1/(self.Mw*(2*np.pi)**0.5))*np.exp(-((self.Mx-self.M0[i])**2)/(2*self.Mw**2)) 
 
@@ -1042,10 +1051,10 @@ class CMDFitter():
 				denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
 				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
 				a1min = num/denom
-				a1max = q0**(alpha1+1.0)/(alpha1+1.0)
+				a1max = np.min([q0**(alpha1+1.0)/(alpha1+1.0),5.0])
 				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (q0+alpha2)
 				a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
-							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0))])
+							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
 				print('q dist < 0 for ',params)
 				print('c = ',c)
 				print('f(0) =',c + a1*q0**alpha1)
@@ -1267,7 +1276,11 @@ class CMDFitter():
 		
 		Ma, resid = nnls(self.MA,Mb)
 
-		norm_c = np.sum(Ma)
+		mfit  = np.zeros_like(self.Mx)
+		for k in range(self.n_bf):
+			mfit += Ma[k]*self.Mbf[k,:]
+
+		norm_c = np.sum(mfit*(self.Mx[1]-self.Mx[0]))
 
 		return Ma/norm_c
 
@@ -1284,7 +1297,11 @@ class CMDFitter():
 		
 		qa, resid = nnls(self.qA,qb)
 
-		norm_c = np.sum(qa)
+		qfit  = np.zeros_like(self.qx)
+		for k in range(self.n_bf):
+			qfit += qa[k]*self.qbf[k,:]
+
+		norm_c = np.sum(qfit*(self.qx[1]-self.qx[0]))
 
 		return qa/norm_c
 
@@ -1321,6 +1338,7 @@ class CMDFitter():
 			for i in range (self.n_bf):
 				for j in range(self.n_bf):
 					PMQ[i+j*self.n_bf] = Ma[i]*qa[j]*fb[i]
+					#print(i,j,i+j*self.n_bf,Ma[i],qa[j],fb[i],PMQ[i+j*self.n_bf])
 	
 		return Ma*(1.0-fb-fo), PMQ
 
@@ -1365,17 +1383,19 @@ class CMDFitter():
 
 		c_P_i = np.ascontiguousarray(P_i.astype(np.float64))
 		c_PMQ = np.ascontiguousarray(PMQ.astype(np.float64))
+
+		n_pts = len(self.data.magnitude)
 		
 		blockshape = (int(256),1, 1)
-		gridshape = (len(self.data.magnitude), 1)
+		gridshape = (n_pts, 1)
 
-		lnP_k = np.zeros(len(self.data.magnitude)).astype(np.float64)
+		lnP_k = np.zeros(n_pts*4).astype(np.float64)
 
 		likelihood(drv.In(c_P_i), drv.In(c_PMQ), drv.In(self.outlier_description),np.float64(h0), np.float64(h1), np.float64(self.h_magnitude_ref),np.float64(fo), drv.InOut(lnP_k), block=blockshape, grid=gridshape)
 
-		lnP = np.sum(lnP_k)
+		lnP = np.sum(lnP_k[:n_pts])
 
-		self.lnP_k = lnP_k
+		self.lnP_k = lnP_k.reshape(n_pts,4,order='F')
 
 
 		if not(np.isfinite(lnP)):
@@ -1412,21 +1432,21 @@ class CMDFitter():
 			denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
 			num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
 			a1min = num/denom
-			a1max = q0**(alpha1+1.0)/(alpha1+1.0)
-
+			a1max = np.min([q0**(alpha1+1.0)/(alpha1+1.0),5.0])
 			a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (q0+alpha2)
 			a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
-						(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0))])
+						(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
 
-
-			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or alpha1 < 1.0 or alpha1 > 3.0 or alpha2 < 1.0 or alpha2 > 3.0 or a1 < a1min or a1 > a1max or a2 < a2min or a2 > a2max:
+			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or alpha1  < 1.0 or alpha2 < 1.0:
 				return self.neginf 
 
 			log_h = np.log10(h0)
 
 			if self.m_model == 'power':
 				prior = norm.pdf(log_k,loc=1.7,scale=0.2) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * truncnorm.pdf(gamma, -2.35, 6.0-2.35, loc=2.35, scale=1.0) * \
-								truncnorm.pdf(c0,0.0,1.0/0.05,loc=0.0,scale=0.05) * truncnorm.pdf(c1,0.0,1.0/0.05,loc=0.0,scale=0.05)
+								truncnorm.pdf(c0,0.0,1.0/0.05,loc=0.0,scale=0.05) * truncnorm.pdf(c1,0.0,1.0/0.05,loc=0.0,scale=0.05) * \
+								truncnorm.pdf(alpha1, 0.0, 10.0/2.0, loc=1.0, scale=2.0) * truncnorm.pdf(alpha2, 0.0, 10.0/2.0, loc=1.0, scale=2.0) * \
+								truncnorm.pdf(q0, -0.45/0.2, 0.45/0.2, loc=0.5, scale=0.2) * truncnorm.pdf(a1, a1min/2.0, a1max/2.0, loc=0.0, scale=2.0) * truncnorm.pdf(a2, a2min/2.0, a2max/2.0, loc=0.0, scale=2.0)
 			else:
 				prior = norm.pdf(b1,loc=0.0,scale=2.0) * norm.pdf(b2,loc=0.0,scale=2.0) * norm.pdf(b3,loc=0.0,scale=2.0) * norm.pdf(b4,loc=0.0,scale=2.0)
 
@@ -1532,16 +1552,15 @@ class CMDFitter():
 
 			if not self.freeze[self.q_index]:
 				# alpha1
-				#x[self.q_index] = truncnorm.ppf(u[i],0.0,10.0/1.0,loc=1.0,scale=1.0)
-				x[self.q_index] = 2.0*u[i] + 1.0
+				x[self.q_index] = truncnorm.ppf(u[i], 0.0, 10.0/2.0, loc=1.0, scale=2.0)
 				i += 1
 			if not self.freeze[self.q_index+1]:
 				# alpha2
-				x[self.q_index+1] = 2.0*u[i] + 1.0
+				x[self.q_index+1] = truncnorm.ppf(u[i], 0.0, 10.0/2.0, loc=1.0, scale=2.0)
 				i += 1
 			if not self.freeze[self.q_index+2]:
 				# q0
-				x[self.q_index+2] = u[i]
+				x[self.q_index+2] = truncnorm.ppf(u[i], -0.45/0.2, 0.45/0.2, loc=0.5, scale=0.2)
 				i += 1
 			if not self.freeze[self.q_index+3]:
 				# a1
@@ -1551,8 +1570,8 @@ class CMDFitter():
 				denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
 				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
 				a1min = num/denom
-				a1max = q0**(alpha1+1.0)/(alpha1+1.0)
-				x[self.q_index+3] = a1min + (a1max-a1min)*u[i]
+				a1max = np.min([q0**(alpha1+1.0)/(alpha1+1.0),5.0])
+				x[self.q_index+3] = truncnorm.ppf(u[i], a1min/2.0, a1max/2.0, loc=0.0, scale=2.0)
 				i += 1
 			if not self.freeze[self.q_index+4]:
 				# a2
@@ -1560,13 +1579,10 @@ class CMDFitter():
 				alpha1 = x[self.q_index]
 				alpha2 = x[self.q_index+1]
 				q0 = x[self.q_index+2]
-
 				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (q0+alpha2)
 				a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
-							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0))])
-				x[self.q_index+4] = a2min + (a2max-a2min)*u[i]
-				#c = 1.0 -  a1*q0**alpha1/(2.0*(alpha1+1.0)) + a2min*(1.0-q0)**alpha2/(2.0*(alpha2+1.0))
-				#print('alpha1, alpha2, q0, c, a1, a2min, f0, f1',alpha1,alpha2, q0, c,a1,a2min,c + a1*q0**alpha1, c + a2min*(1.0-q0)**alpha2)
+							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
+				x[self.q_index+4] = truncnorm.ppf(u[i], a2min/2.0, a2max/2.0, loc=0.0, scale=2.0)
 				i += 1
 
 			if not self.freeze[self.b_index]:
@@ -1586,7 +1602,7 @@ class CMDFitter():
 
 			if not self.freeze[self.b_index+3]:
 				# log h0
-				logh = truncnorm.ppf(u[i], -1.0/0.2, 1.0/0.2, loc=0.0, scale=0.2)
+				logh = truncnorm.ppf(u[i], -0.3/0.2, 0.3/0.1, loc=0.0, scale=0.1)
 				x[self.b_index+3] = 10.0**logh
 				i += 1
 			if not self.freeze[self.b_index+4]:
