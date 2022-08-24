@@ -339,7 +339,11 @@ class Isochrone():
 			h, h_edges = np.histogram(data_delta[pts],bins=bin_edges)
 			j = np.argmax(h)
 			htop = h[j-1:j+2]
-			xtop = 0.5*(h_edges[j-1:j+2]+h_edges[j:j+3])
+			try:
+				xtop = 0.5*(h_edges[j-1:j+2]+h_edges[j:j+3])
+			except:
+				print('mag_range,mags,colours,j,h_edges,h:',edges[i:i+2],data.magnitude[pts],data.colour[pts],j,h_edges,h)
+				raise
 			A = np.vstack((xtop**2,xtop,np.ones_like(xtop))).T
 			c = np.linalg.solve(A,htop)
 			y[i] = -0.5*c[1]/c[0]
@@ -799,14 +803,14 @@ class CMDFitter():
 		if q_model == 'power':
 			self.ndim = 15
 			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$\alpha_1$",  r"$\alpha_2$", r"$q_0$",  r"$a_1$", r"$a_2$", r"$f_B$", r"$\dot{f_B}$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.4,              0.55,     0.0006,       0.0,       0.0,             2.0,           2.0,            0.5,       1.0,      1.0,      0.35,     0.0,        0.01,     1.0,      0.00])
+			self.default_params = np.array([4.0,              0.0,     0.0006,       0.0,       0.0,             2.0,           2.0,            0.5,       1.0,      1.0,      0.35,     0.0,        0.01,     1.0,      0.00])
 			self.q_index = 5
 			self.b_index = 10
 
 		if q_model == 'legendre':
 			self.ndim = 16
 			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$a_1$", r"$a_2$", r"$a_3$", r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$", r"$f_B,0$", r"\dot{f_B}$", r"$f_O$", r"$h_0$", r"$h_1$"]
-			self.default_params = np.array([2.4,              0.55,     0.0006,       0.0,       0.0,             0.0,      0.0,      0.0,      0.0,            0.0,            0.0,            0.35,       0.0,        0.01,     1.0,      0.00])
+			self.default_params = np.array([4.0,              0.0,     0.0006,       0.0,       0.0,             0.0,      0.0,      0.0,      0.0,            0.0,            0.0,            0.35,       0.0,        0.01,     1.0,      0.00])
 			self.q_index = 5
 			self.b_index = 11
 
@@ -1049,9 +1053,15 @@ class CMDFitter():
 
 			if np.min(qdist) < 0.0:
 				denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
-				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
+				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0-2.0*q0)
 				a1min = num/denom
-				a1max = np.min([q0**(alpha1+1.0)/(alpha1+1.0),5.0])
+				a1max = np.min([(alpha1+1.0)/q0**(alpha1+1.0)])
+
+				# denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
+				# num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
+				# a1min = num/denom
+				# a1max = np.min([q0**(alpha1+1.0)/(alpha1+1.0),5.0])
+
 				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (q0+alpha2)
 				a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
 							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
@@ -1274,7 +1284,7 @@ class CMDFitter():
 		for k in range(self.n_bf):
 			Mb[k] = np.sum(My*self.Mbf[k,:]/self.Msigma**2)
 		
-		Ma, resid = nnls(self.MA,Mb)
+		Ma, resid = nnls(self.MA,Mb,maxiter=5000)
 
 		mfit  = np.zeros_like(self.Mx)
 		for k in range(self.n_bf):
@@ -1295,7 +1305,7 @@ class CMDFitter():
 		for k in range(self.n_bf):
 			qb[k] = np.sum(qy*self.qbf[k,:]/self.qsigma**2)
 		
-		qa, resid = nnls(self.qA,qb)
+		qa, resid = nnls(self.qA,qb,maxiter=5000)
 
 		qfit  = np.zeros_like(self.qx)
 		for k in range(self.n_bf):
@@ -1568,9 +1578,9 @@ class CMDFitter():
 				alpha2 = x[self.q_index+1]
 				q0 = x[self.q_index+2]
 				denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
-				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
+				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0-2.0*q0)
 				a1min = num/denom
-				a1max = np.min([q0**(alpha1+1.0)/(alpha1+1.0),5.0])
+				a1max = np.min([(alpha1+1.0)/q0**(alpha1+1.0)])
 				x[self.q_index+3] = truncnorm.ppf(u[i], a1min/2.0, a1max/2.0, loc=0.0, scale=2.0)
 				i += 1
 			if not self.freeze[self.q_index+4]:
