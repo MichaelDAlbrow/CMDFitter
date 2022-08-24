@@ -542,7 +542,7 @@ class PlotUtils():
 		return ax
 
 
-	def plot_prior_q_distribution(fitter,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png'):
+	def plot_prior_q_distribution(fitter,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png',alpha=None):
 
 		"""Plot the implied binary mass-ratio distributiion function for n_plot_samples drawn randomly from samples."""
 
@@ -560,6 +560,9 @@ class PlotUtils():
 
 		nfreeze = int(np.sum(fitter.freeze))
 
+		if alpha is not None:
+			alpha = np.min([1.0,100.0/n_plot_samples])
+
 		for i in range(n_plot_samples):
 
 			x = np.random.rand(fitter.ndim-nfreeze)
@@ -567,7 +570,7 @@ class PlotUtils():
 			p[np.where(fitter.freeze == 0)[0]] = pt
 			args = p[fitter.q_index:fitter.b_index].tolist()
 			args.append(fitter.M_ref)
-			ax.plot(q,fitter.q_distribution(q,args),'b-',alpha=np.min([1.0,100.0/n_plot_samples]))
+			ax.plot(q,fitter.q_distribution(q,args),'b-',alpha=alpha)
 
 		ax.set_ylim((0,4))
 		ax.set_xlim((0,1))
@@ -1062,7 +1065,7 @@ class CMDFitter():
 				# a1min = num/denom
 				# a1max = np.min([q0**(alpha1+1.0)/(alpha1+1.0),5.0])
 
-				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (q0+alpha2)
+				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2-q0)
 				a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
 							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
 				print('q dist < 0 for ',params)
@@ -1440,10 +1443,10 @@ class CMDFitter():
 			fb_end = fb0 + fb1*self.mass_range
 
 			denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
-			num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
+			num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0-2.0*q0)
 			a1min = num/denom
-			a1max = np.min([q0**(alpha1+1.0)/(alpha1+1.0),5.0])
-			a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (q0+alpha2)
+			a1max = np.min([(alpha1+1.0)/q0**(alpha1+1.0)])
+			a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2-q0)
 			a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
 						(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
 
@@ -1589,7 +1592,7 @@ class CMDFitter():
 				alpha1 = x[self.q_index]
 				alpha2 = x[self.q_index+1]
 				q0 = x[self.q_index+2]
-				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (q0+alpha2)
+				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2-q0)
 				a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
 							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
 				x[self.q_index+4] = truncnorm.ppf(u[i], a2min/2.0, a2max/2.0, loc=0.0, scale=2.0)
