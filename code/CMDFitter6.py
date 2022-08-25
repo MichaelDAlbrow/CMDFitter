@@ -1056,7 +1056,7 @@ class CMDFitter():
 
 			if np.min(qdist) < 0.0:
 				denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
-				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0-2.0*q0)
+				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
 				a1min = num/denom
 				a1max = np.min([(alpha1+1.0)/q0**(alpha1+1.0)])
 
@@ -1065,7 +1065,7 @@ class CMDFitter():
 				# a1min = num/denom
 				# a1max = np.min([q0**(alpha1+1.0)/(alpha1+1.0),5.0])
 
-				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2-q0)
+				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2+q0)
 				a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
 							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
 				print('q dist < 0 for ',params)
@@ -1443,10 +1443,10 @@ class CMDFitter():
 			fb_end = fb0 + fb1*self.mass_range
 
 			denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
-			num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0-2.0*q0)
+			num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
 			a1min = num/denom
 			a1max = np.min([(alpha1+1.0)/q0**(alpha1+1.0)])
-			a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2-q0)
+			a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2+q0)
 			a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
 						(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
 
@@ -1581,7 +1581,7 @@ class CMDFitter():
 				alpha2 = x[self.q_index+1]
 				q0 = x[self.q_index+2]
 				denom = (alpha2-alpha1)*q0 - (alpha1+1.0)*alpha2
-				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0-2.0*q0)
+				num = q0**(-alpha1)*(alpha1+1.0)*(alpha2+1.0)
 				a1min = num/denom
 				a1max = np.min([(alpha1+1.0)/q0**(alpha1+1.0)])
 				x[self.q_index+3] = truncnorm.ppf(u[i], a1min/2.0, a1max/2.0, loc=0.0, scale=2.0)
@@ -1592,7 +1592,7 @@ class CMDFitter():
 				alpha1 = x[self.q_index]
 				alpha2 = x[self.q_index+1]
 				q0 = x[self.q_index+2]
-				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2-q0)
+				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2+q0)
 				a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
 							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
 				x[self.q_index+4] = truncnorm.ppf(u[i], a2min/2.0, a2max/2.0, loc=0.0, scale=2.0)
