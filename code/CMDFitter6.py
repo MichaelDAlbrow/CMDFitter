@@ -528,10 +528,10 @@ class PlotUtils():
 			p[np.where(fitter.freeze == 0)] = samples[ind]
 			args = p[fitter.q_index:fitter.b_index].tolist()
 			args.append(fitter.M_ref)
-			ax.plot(q,fitter.q_distribution(q,args),'b-',alpha=0.01)
+			ax.plot(fitter.q_min+q*(1.0-fitter.q_min),fitter.q_distribution(q,args),'b-',alpha=0.01)
 
 		ax.set_ylim((0,4))
-		ax.set_xlim((0,1))
+		ax.set_xlim((fitter.q_min,1))
 
 		ax.set_xlabel(r'$q$')
 		ax.set_ylabel(r'$P(q)$')
@@ -542,7 +542,7 @@ class PlotUtils():
 		return ax
 
 
-	def plot_prior_q_distribution(fitter,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png',alpha=None):
+	def plot_prior_q_distribution(fitter,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png',alpha=0.01):
 
 		"""Plot the implied binary mass-ratio distributiion function for n_plot_samples drawn randomly from samples."""
 
@@ -560,9 +560,6 @@ class PlotUtils():
 
 		nfreeze = int(np.sum(fitter.freeze))
 
-		if alpha is not None:
-			alpha = np.min([1.0,100.0/n_plot_samples])
-
 		for i in range(n_plot_samples):
 
 			x = np.random.rand(fitter.ndim-nfreeze)
@@ -570,10 +567,10 @@ class PlotUtils():
 			p[np.where(fitter.freeze == 0)[0]] = pt
 			args = p[fitter.q_index:fitter.b_index].tolist()
 			args.append(fitter.M_ref)
-			ax.plot(q,fitter.q_distribution(q,args),'b-',alpha=alpha)
+			ax.plot(fitter.q_min+q*(1.0-fitter.q_min),fitter.q_distribution(q,args),'b-',alpha=alpha)
 
 		ax.set_ylim((0,4))
-		ax.set_xlim((0,1))
+		ax.set_xlim((fitter.q_min,1))
 
 		ax.set_xlabel(r'$q$')
 		ax.set_ylabel(r'$P(q)$')
@@ -628,15 +625,15 @@ class PlotUtils():
 			yq4[j] = qq[3]
 			yq5[j] = qq[4]
 
-		ax.fill_between(q,y1=yq1,y2=yq5,color='b',alpha=0.1)
-		ax.fill_between(q,y1=yq2,y2=yq4,color='b',alpha=0.4)
+		ax.fill_between(fitter.q_min+q*(1.0-fitter.q_min),y1=yq1,y2=yq5,color='b',alpha=0.1)
+		ax.fill_between(fitter.q_min+q*(1.0-fitter.q_min),y1=yq2,y2=yq4,color='b',alpha=0.4)
 
-		ax.plot(q,yq3,'r-')
+		ax.plot(fitter.q_min+q*(1.0-fitter.q_min),yq3,'r-')
 
 		ax.set_xlabel(r'$q$')
 		ax.set_ylabel(r"$f_B \, (q'>q)$")
 
-		ax.set_xlim((0,1))
+		ax.set_xlim((fitter.q_min,1))
 		ax.set_ylim((0,1.0))
 
 		ax.tick_params(axis='y',which='both',direction='in',right=True)
@@ -698,15 +695,15 @@ class PlotUtils():
 			yq4[j] = qq[3]
 			yq5[j] = qq[4]
 
-		ax.fill_between(q,y1=yq1,y2=yq5,color='b',alpha=0.1)
-		ax.fill_between(q,y1=yq2,y2=yq4,color='b',alpha=0.4)
+		ax.fill_between(fitter.q_min+q*(1.0-fitter.q_min),y1=yq1,y2=yq5,color='b',alpha=0.1)
+		ax.fill_between(fitter.q_min+q*(1.0-fitter.q_min),y1=yq2,y2=yq4,color='b',alpha=0.4)
 
-		ax.plot(q,yq3,'r-')
+		ax.plot(fitter.q_min+q*(1.0-fitter.q_min),yq3,'r-')
 
 		ax.set_xlabel(r'$q$')
 		ax.set_ylabel(r"$f_B \, (q'>q)$")
 
-		ax.set_xlim((0,1))
+		ax.set_xlim((fitter.q_min,1))
 		ax.set_ylim((0,1.0))
 
 		ax.tick_params(axis='y',which='both',direction='in',right=True)
@@ -772,7 +769,7 @@ class PlotUtils():
 class CMDFitter():
 
 
-	def __init__(self,json_file=None,data=None,isochrone=None,trim_data=True,q_model='legendre',m_model='power',outlier_scale=2.0):
+	def __init__(self,json_file=None,data=None,isochrone=None,trim_data=True,q_model='legendre',m_model='power',outlier_scale=2.0,q_min=0.2):
 
 
 		"""
@@ -791,7 +788,9 @@ class CMDFitter():
 
 			q_model:		(string) functional form for q distribution. Must be "power" or "legendre"
 
-			outlier_scale   (float) multiplicative constant to scale the bivariate gaussian data distribution to make the outlier distribution
+			outlier_scale:  (float) multiplicative constant to scale the bivariate gaussian data distribution to make the outlier distribution
+
+			q_min:			(float) The q distribution function is defined over (q_min,1). fb means fraction of binaries with q > q_min
 
 		"""
 
@@ -812,7 +811,7 @@ class CMDFitter():
 
 		if q_model == 'legendre':
 			self.ndim = 16
-			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$a_1$", r"$a_2$", r"$a_3$", r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$", r"$f_B,0$", r"\dot{f_B}$", r"$f_O$", r"$h_0$", r"$h_1$"]
+			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$",  r"$c_0$",  r"$\dot{c}_0$",  r"$a_1$", r"$a_2$", r"$a_3$", r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$", r"$f_B$", r"\dot{f_B}$", r"$f_O$", r"$h_0$", r"$h_1$"]
 			self.default_params = np.array([4.0,              0.0,     0.0006,       0.0,       0.0,             0.0,      0.0,      0.0,      0.0,            0.0,            0.0,            0.35,       0.0,        0.01,     1.0,      0.00])
 			self.q_index = 5
 			self.b_index = 11
@@ -851,6 +850,9 @@ class CMDFitter():
 		self.int_sl_2 = lambda x: 2.0*x**3 - 3.0*x**2 + x
 		self.int_sl_3 = lambda x: 5.0*x**4 - 10.0*x**3 + 6.0*x**2 - x
 		self.int_sl_4 = lambda x: 14.0*x**5 - 35.0*x**4 + 30.0*x**3 - 10.0*x**2 + x
+
+		assert q_min >= 0.0 and q_min < 1.0
+		self.q_min = q_min
 
 		self.neginf = -np.inf
 
@@ -921,7 +923,8 @@ class CMDFitter():
 
 		#self.qw = 0.012
 		self.qw = 0.8*1.0/self.n_bf
-		self.q0 = np.linspace(0.0,1.0,self.n_bf)
+		#self.q0 = np.linspace(0.0,1.0,self.n_bf)
+		self.q0 = np.linspace(self.q_min,1.0,self.n_bf)
 
 		self.qsigma = 0.0001
 		self.qx = np.linspace(0.001,1,500)
@@ -1234,8 +1237,10 @@ class CMDFitter():
 				q_sampler = self.q_distribution_sampler(args)
 
 				q[i] = q_sampler(np.random.rand())
-			
-		mag[n_outliers:], colour[n_outliers:] = self.iso.binary(M1[n_outliers:],q[n_outliers:])
+
+		# Map (0,1) to (qmin,1)  at this point
+		qq = self.q_min + q*(1.0-self.q_min)			
+		mag[n_outliers:], colour[n_outliers:] = self.iso.binary(M1[n_outliers:],qq[n_outliers:])
 
 		if add_observational_scatter:
 
@@ -1329,6 +1334,7 @@ class CMDFitter():
 
 		fb0, fb1, fo, h0, h1 = params[self.b_index:]
 
+		# fb is a vector here
 		fb = fb0 + fb1*(self.mass_slice[1] - self.M0)
 
 		PMQ = np.zeros(self.n_bf**2)
