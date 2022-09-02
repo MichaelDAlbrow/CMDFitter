@@ -35,6 +35,7 @@ class Data():
 
 			data_dict:			(dictionary) with entries:
 								file : (string) data file name
+								name: (string) data set name
 								magnitude_min: (float) minimum magnitude to use
 								magnitude_max: (float) maximum magnitude to use
 								column_mag: (int) column number in file corresponding to magnitude
@@ -73,6 +74,10 @@ class Data():
 			self.trim_left = data_dict['trim_above']
 		if 'trim_right' in data_dict:
 			self.trim_right = data_dict['trim_right']
+
+		self.name = ""
+		if 'name' in data_dict:
+			self.name = data_dict['name']
 
 
 		# set up data covariance matrices
@@ -188,7 +193,8 @@ class Data():
 
 		if plot:
 
-			ax.scatter(self.colour,self.magnitude,c='b',s=0.2,marker='.')
+			ax.scatter(self.colour,self.magnitude,c='b',s=0.5,marker='.')
+			ax.scatter(-100,-100,c='w',s=0.001,marker='.',label=self.name)
 
 			xmag = np.linspace(self.magnitude_min-0.5,self.magnitude_max+0.5,1001)
 			ax.plot(isochrone.mag_colour_interp(xmag),xmag,'r-',alpha=1.0)
@@ -207,6 +213,7 @@ class Data():
 			ax.set_ylabel(self.magnitude_label)
 			ax.set_ylim([self.magnitude_max+1,self.magnitude_min-1])
 			ax.set_xlim([np.min(isochrone.mag_colour_interp(xmag))-0.25,np.max(isochrone.mag_colour_interp(xmag))+0.5])
+			ax.legend(frameon=False)
 
 			if return_axis:
 				
@@ -645,6 +652,50 @@ class PlotUtils():
 		return ax, yq3, yq3-yq2, yq4-yq3
 
 
+	def print_fb_q(fitter,samples,weights=None,ax=None,save_figure=True,plot_file='fb_q.png'):
+
+		"""Using all samples, print the implied binary mass-fraction for q' > q along with its 1- and 2-sigma uncertainty."""
+
+		from statsmodels.stats.weightstats import DescrStatsW
+
+		assert isinstance(fitter, CMDFitter)
+
+		q_dash = np.linspace(fitter.q_min,0.9,8)
+		q = (q_dash-fitter.q_min)/(1.0-fitter.q_min)
+
+		sig1 = 0.5 * 68.27
+		sig2 = 0.5 * 95.45
+
+		yq1 = np.zeros(101)
+		yq2 = np.zeros(101)
+		yq3 = np.zeros(101)
+		yq4 = np.zeros(101)
+		yq5 = np.zeros(101)
+
+		for j in range(101):
+
+			y = np.zeros(len(samples))
+
+			for i in range(len(samples)):
+
+				p = fitter.default_params.copy()
+				p[fitter.freeze == 0] = samples[i]
+
+				y[i] = p[fitter.b_index] * fitter.q_distribution_integral(p[fitter.q_index:fitter.b_index],q[j],1.0)
+
+			wq  = DescrStatsW(data=y,weights=weights)
+			qq = wq.quantile(probs=np.array(0.01*np.array([50.0-sig2,50.0-sig1,50.0,50.0+sig1,50.0+sig2])),\
+			            return_pandas=False)
+
+			yq1[j] = qq[0]
+			yq2[j] = qq[1]
+			yq3[j] = qq[2]
+			yq4[j] = qq[3]
+			yq5[j] = qq[4]
+
+		return 
+
+
 	def plot_prior_fb_q(fitter,n_samples=1000,ax=None,save_figure=True,plot_file='fb_q.png'):
 
 		"""Using all samples, plot the implied binary mass-fraction for q' > q along with its 1- and 2-sigma uncertainty."""
@@ -715,7 +766,7 @@ class PlotUtils():
 		return ax
 
 
-	def plot_realisation(fitter,params,plot_file='realisation.png',outliers=True,scatter=True):
+	def plot_realisation(fitter,params,plot_file='realisation.png',outliers=True,scatter=True,plot_name=True):
 
 		"""Plot the data CMD and 3 comparative random realisations of the model implied by params."""
 
@@ -729,13 +780,23 @@ class PlotUtils():
 
 		ax[0].scatter(fitter.data.colour,fitter.data.magnitude,s=0.5,c='k')
 		ax[0].plot(fitter.iso.mag_colour_interp(xmag),xmag,'g-',alpha=0.6)
+		ax[0].invert_y_axis()
+		xlimits = ax[0].get_xlim()
+		ylimits = ax[0].get_ylim()
+
+		if plot_name:
+			ax[0].scatter(-100,-100,marker='.',s=0.0001,c='w',label=fitter.data.name)
+			ax[0].legend(frameon=False,loc='upper right',fontsize='small')
+			ax[0].set_xlim(xlimits)
+			ax[0].set_ylim(ylimits)
+
+
 		#ax[0].grid()
 		ax[0].set_xlabel(fitter.data.colour_label)
 		ax[0].set_ylabel(fitter.data.magnitude_label)
 		ax[0].set_ylim([fitter.data.magnitude_max+0.3,fitter.data.magnitude_min-1])
 		ax[0].tick_params(axis='y',which='both',direction='in',right=True)
 		ax[0].tick_params(axis='x',which='both',direction='in',top=True)
-		xlimits = ax[0].get_xlim()
 
 		for i in range(1,4):
 
@@ -747,9 +808,10 @@ class PlotUtils():
 			#ax[i].grid()
 			ax[i].set_xlabel(fitter.data.colour_label)
 			ax[i].set_xlim(xlimits)
-			ax[i].set_ylim([fitter.data.magnitude_max+0.3,fitter.data.magnitude_min-1])
+			ax[i].set_ylim(ylimits)
 			ax[i].tick_params(axis='y',which='both',direction='in',right=True)
 			ax[i].tick_params(axis='x',which='both',direction='in',top=True)
+
 
 
 		plt.tight_layout()
@@ -856,7 +918,7 @@ class CMDFitter():
 
 		self.neginf = -np.inf
 
-		self.scale_fo = 0.001
+		self.scale_fo = 0.01
 
 
 		# Exit now if no input provided
@@ -1140,13 +1202,17 @@ class CMDFitter():
 
 			y = 0.0
 			if q2 < q0:
-				y += 0.5*a1*(2.0*q2-1.0)*(q0-q2)**alpha1/(alpha1+1.0) + c*q2 + 0.5*a1*q0**alpha1/(alpha1+1.0)
+				#y += 0.5*a1*(2.0*q2-1.0)*(q0-q2)**alpha1/(alpha1+1.0) + c*q2 + 0.5*a1*q0**alpha1/(alpha1+1.0)
+				y += c*q2 + a1*(q0**(alpha1+1.0) - (q0-q2)**(alpha1+1.0))/(alpha1+1.0)
 			else:
-				y += 0.5*a1*q0**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q2-1.0)*(q2-q0)**alpha2/(alpha2+1.0) + c*q2
+				y += c*q2 + a1*q0**(alpha1+1.0)/(alpha1+1.0) + a2*(q2-q0)**(alpha2+1.0)/(alpha2+1.0)
+				#y += 0.5*a1*q0**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q2-1.0)*(q2-q0)**alpha2/(alpha2+1.0) + c*q2
 			if q1 < q0:
-				y -= 0.5*a1*(2.0*q1-1.0)*(q0-q1)**alpha1/(alpha1+1.0) + c*q1 + 0.5*a1*q0**alpha1/(alpha1+1.0)
+				y -= c*q1 + a1*(q0**(alpha1+1.0) - (q0-q1)**(alpha1+1.0))/(alpha1+1.0)
+				#y -= 0.5*a1*(2.0*q1-1.0)*(q0-q1)**alpha1/(alpha1+1.0) + c*q1 + 0.5*a1*q0**alpha1/(alpha1+1.0)
 			else:
-				y -= 0.5*a1*q0**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q1-1.0)*(q1-q0)**alpha2/(alpha2+1.0) + c*q1
+				y -= c*q1 + a1*q0**(alpha1+1.0)/(alpha1+1.0) + a2*(q1-q0)**(alpha2+1.0)/(alpha2+1.0)
+				#y -= 0.5*a1*q0**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q1-1.0)*(q1-q0)**alpha2/(alpha2+1.0) + c*q1
 
 		return y
 
@@ -1454,7 +1520,7 @@ class CMDFitter():
 			a1max = np.min([(alpha1+1.0)/q0**(alpha1+1.0)])
 			a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2+q0)
 			a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
-						(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
+						(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0))])
 
 			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95 or alpha1  < 1.0 or alpha2 < 1.0:
 				return self.neginf 
@@ -1600,7 +1666,7 @@ class CMDFitter():
 				q0 = x[self.q_index+2]
 				a2min = (a1*q0**(alpha1+1.0)/(alpha1+1) - 1.0) * (1.0-q0)**(-alpha2) * (alpha2+1) / (alpha2+q0)
 				a2max = np.min([(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0  +   q0**alpha1*a1*  (alpha1+1.0 - q0)/(alpha1+1.0))  , \
-							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0)),5.0])
+							(1.0-q0)**(-(alpha2+1.0))*(alpha2+1.0) * (1.0 - q0**(alpha1+1.0)*a1/(alpha1+1.0))])
 				x[self.q_index+4] = truncnorm.ppf(u[i], a2min/2.0, a2max/2.0, loc=0.0, scale=2.0)
 				i += 1
 
