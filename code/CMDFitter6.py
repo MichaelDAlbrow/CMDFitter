@@ -465,7 +465,7 @@ class Isochrone():
 class PlotUtils():
 
 
-	def plot_mass_function(fitter,samples,logp=False,weights=None,ax=None,n_plot_samples=1000,save_figure=True,plot_file='mass_function.png'):
+	def plot_mass_function(fitter,samples,map_sol=None,logp=False,weights=None,ax=None,n_plot_samples=1000,save_figure=True,plot_file='mass_function.png',plot_name=True):
 
 		"""Plot the implied mass function for n_plot_samples drawn randomly from samples."""
 
@@ -474,7 +474,7 @@ class PlotUtils():
 		assert isinstance(fitter,CMDFitter)
 
 		if ax is None:
-			plt.figure(figsize=(6,4))
+			plt.figure(figsize=(3,2))
 			ax = plt.axes()
 
 		m = np.linspace(fitter.mass_slice[0],fitter.mass_slice[1],1001)
@@ -495,6 +495,25 @@ class PlotUtils():
 		#ax.set_ylim((0,4))
 		#ax.set_xlim((0,1))
 
+
+		if map_sol is not None:
+			p = fitter.default_params.copy()
+			p[np.where(fitter.freeze == 0)] = map_sol
+			args = p[fitter.q_index:fitter.b_index].tolist()
+			if logp:
+				ax.plot(m,np.log10(fitter.M_distribution(m,p[:fitter.q_index])),'r-',alpha=1,lw=2)
+			else:
+				ax.plot(m,fitter.M_distribution(m,p[:fitter.q_index]),'r-',alpha=1,lw=2)
+
+		if plot_name:
+			xlimits = ax.get_xlim()
+			ylimits = ax.get_ylim()
+			ax.scatter(-100,-100,marker='.',s=0.0001,c='w',label=fitter.data.name)
+			ax.legend(frameon=False,loc='upper right',fontsize='small')
+			ax.set_xlim(xlimits)
+			ax.set_ylim(ylimits)
+
+
 		ax.set_xlabel(r'$M$')
 
 		if logp:
@@ -503,6 +522,7 @@ class PlotUtils():
 			ax.set_ylabel(r'$P(M)$')
 
 		if save_figure:
+			plt.tight_layout()
 			plt.savefig(plot_file)
 
 		return ax
@@ -510,7 +530,7 @@ class PlotUtils():
 
 
 
-	def plot_q_distribution(fitter,samples,weights=None,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png'):
+	def plot_q_distribution(fitter,samples,weights=None,map_sol=None,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png',plot_name=True):
 
 		"""Plot the implied binary mass-ratio distributiion function for n_plot_samples drawn randomly from samples."""
 
@@ -519,7 +539,7 @@ class PlotUtils():
 		assert isinstance(fitter,CMDFitter)
 
 		if ax is None:
-			plt.figure(figsize=(6,4))
+			plt.figure(figsize=(3,2))
 			ax = plt.axes()
 
 		q = np.linspace(0,1,101)
@@ -537,19 +557,37 @@ class PlotUtils():
 			args.append(fitter.M_ref)
 			ax.plot(fitter.q_min+q*(1.0-fitter.q_min),fitter.q_distribution(q,args),'b-',alpha=0.01)
 
-		ax.set_ylim((0,4))
+		if map_sol is not None:
+			p = fitter.default_params.copy()
+			p[np.where(fitter.freeze == 0)] = map_sol
+			args = p[fitter.q_index:fitter.b_index].tolist()
+			args.append(fitter.M_ref)
+			ax.plot(fitter.q_min+q*(1.0-fitter.q_min),fitter.q_distribution(q,args),'r-',alpha=1,lw=2)
+		
+		if plot_name:
+			xlimits = ax.get_xlim()
+			ylimits = ax.get_ylim()
+			ax.scatter(-100,-100,marker='.',s=0.0001,c='w',label=fitter.data.name)
+			ax.legend(frameon=False,loc='upper left',fontsize='small')
+			ax.set_xlim(xlimits)
+			ax.set_ylim(ylimits)
+
+
+
+		ax.set_ylim((0,3))
 		ax.set_xlim((fitter.q_min,1))
 
 		ax.set_xlabel(r'$q$')
 		ax.set_ylabel(r'$P(q)$')
 
 		if save_figure:
+			plt.tight_layout()
 			plt.savefig(plot_file)
 
 		return ax
 
 
-	def plot_prior_q_distribution(fitter,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png',alpha=0.01):
+	def plot_prior_q_distribution(fitter,ax=None,n_plot_samples=1000,save_figure=True,plot_file='q_dist.png',alpha=0.01,plot_name=True):
 
 		"""Plot the implied binary mass-ratio distributiion function for n_plot_samples drawn randomly from samples."""
 
@@ -558,7 +596,7 @@ class PlotUtils():
 		assert isinstance(fitter,CMDFitter)
 
 		if ax is None:
-			plt.figure(figsize=(6,4))
+			plt.figure(figsize=(3,2))
 			ax = plt.axes()
 
 		p = fitter.default_params.copy()
@@ -576,19 +614,29 @@ class PlotUtils():
 			args.append(fitter.M_ref)
 			ax.plot(fitter.q_min+q*(1.0-fitter.q_min),fitter.q_distribution(q,args),'b-',alpha=alpha)
 
-		ax.set_ylim((0,4))
+		if plot_name:
+			xlimits = ax.get_xlim()
+			ylimits = ax.get_ylim()
+			ax.scatter(-100,-100,marker='.',s=0.0001,c='w',label='Prior')
+			ax.legend(frameon=False,loc='upper left',fontsize='small')
+			ax.set_xlim(xlimits)
+			ax.set_ylim(ylimits)
+
+
+		ax.set_ylim((0,3))
 		ax.set_xlim((fitter.q_min,1))
 
 		ax.set_xlabel(r'$q$')
 		ax.set_ylabel(r'$P(q)$')
 
 		if save_figure:
+			plt.tight_layout()
 			plt.savefig(plot_file)
 
 		return ax
 
 
-	def plot_fb_q(fitter,samples,weights=None,ax=None,save_figure=True,plot_file='fb_q.png'):
+	def plot_fb_q(fitter,samples,weights=None,ax=None,save_figure=True,plot_file='fb_q.png',plot_name=True):
 
 		"""Using all samples, plot the implied binary mass-fraction for q' > q along with its 1- and 2-sigma uncertainty."""
 
@@ -597,7 +645,7 @@ class PlotUtils():
 		assert isinstance(fitter, CMDFitter)
 
 		if ax is None:
-			plt.figure(figsize=(6,4))
+			plt.figure(figsize=(3,2))
 			ax = plt.axes()
 
 		q = np.linspace(0,1,101)
@@ -640,13 +688,22 @@ class PlotUtils():
 		ax.set_xlabel(r'$q$')
 		ax.set_ylabel(r"$f_B \, (q'>q)$")
 
+		if plot_name:
+			xlimits = ax.get_xlim()
+			ylimits = ax.get_ylim()
+			ax.scatter(-100,-100,marker='.',s=0.0001,c='w',label=fitter.data.name)
+			ax.legend(frameon=False,loc='upper right',fontsize='small')
+			ax.set_xlim(xlimits)
+			ax.set_ylim(ylimits)
+
 		ax.set_xlim((fitter.q_min,1))
-		ax.set_ylim((0,1.0))
+		ax.set_ylim((0,0.5))
 
 		ax.tick_params(axis='y',which='both',direction='in',right=True)
 		ax.tick_params(axis='x',which='both',direction='in',top=True)
 
 		if save_figure:
+			plt.tight_layout()
 			plt.savefig(plot_file)
 
 		return ax, yq3, yq3-yq2, yq4-yq3
@@ -696,7 +753,7 @@ class PlotUtils():
 		return 
 
 
-	def plot_prior_fb_q(fitter,n_samples=1000,ax=None,save_figure=True,plot_file='fb_q.png'):
+	def plot_prior_fb_q(fitter,n_samples=1000,ax=None,save_figure=True,plot_file='fb_q.png',plot_name=True):
 
 		"""Using all samples, plot the implied binary mass-fraction for q' > q along with its 1- and 2-sigma uncertainty."""
 
@@ -707,7 +764,7 @@ class PlotUtils():
 		assert fitter.q_model == 'legendre'
 
 		if ax is None:
-			plt.figure(figsize=(6,4))
+			plt.figure(figsize=(3,2))
 			ax = plt.axes()
 
 		q = np.linspace(0,1,101)
@@ -754,13 +811,22 @@ class PlotUtils():
 		ax.set_xlabel(r'$q$')
 		ax.set_ylabel(r"$f_B \, (q'>q)$")
 
+		if plot_name:
+			xlimits = ax.get_xlim()
+			ylimits = ax.get_ylim()
+			ax.scatter(-100,-100,marker='.',s=0.0001,c='w',label='Prior')
+			ax.legend(frameon=False,loc='upper right',fontsize='small')
+			ax.set_xlim(xlimits)
+			ax.set_ylim(ylimits)
+
 		ax.set_xlim((fitter.q_min,1))
-		ax.set_ylim((0,1.0))
+		ax.set_ylim((0,0.5))
 
 		ax.tick_params(axis='y',which='both',direction='in',right=True)
 		ax.tick_params(axis='x',which='both',direction='in',top=True)
 
 		if save_figure:
+			plt.tight_layout()
 			plt.savefig(plot_file)
 
 		return ax
@@ -780,7 +846,7 @@ class PlotUtils():
 
 		ax[0].scatter(fitter.data.colour,fitter.data.magnitude,s=0.5,c='k')
 		ax[0].plot(fitter.iso.mag_colour_interp(xmag),xmag,'g-',alpha=0.6)
-		ax[0].invert_y_axis()
+		ax[0].invert_yaxis()
 		xlimits = ax[0].get_xlim()
 		ylimits = ax[0].get_ylim()
 
@@ -1530,7 +1596,7 @@ class CMDFitter():
 			if self.m_model == 'power':
 				prior = norm.pdf(log_k,loc=1.7,scale=0.2) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * truncnorm.pdf(gamma, -2.35, 6.0-2.35, loc=2.35, scale=1.0) * \
 								truncnorm.pdf(c0,0.0,1.0/0.05,loc=0.0,scale=0.05) * truncnorm.pdf(c1,0.0,1.0/0.05,loc=0.0,scale=0.05) * \
-								truncnorm.pdf(alpha1, 0.0, 10.0/2.0, loc=1.0, scale=2.0) * truncnorm.pdf(alpha2, 0.0, 10.0/2.0, loc=1.0, scale=2.0) * \
+								truncnorm.pdf(alpha1, -0.9/2.0, 10.0/2.0, loc=2.0, scale=2.0) * truncnorm.pdf(alpha2, -0.9/2.0, 10.0/2.0, loc=2.0, scale=2.0) * \
 								truncnorm.pdf(q0, -0.45/0.2, 0.45/0.2, loc=0.5, scale=0.2) * truncnorm.pdf(a1, a1min/2.0, a1max/2.0, loc=0.0, scale=2.0) * truncnorm.pdf(a2, a2min/2.0, a2max/2.0, loc=0.0, scale=2.0)
 			else:
 				prior = norm.pdf(b1,loc=0.0,scale=2.0) * norm.pdf(b2,loc=0.0,scale=2.0) * norm.pdf(b3,loc=0.0,scale=2.0) * norm.pdf(b4,loc=0.0,scale=2.0)
@@ -1637,11 +1703,11 @@ class CMDFitter():
 
 			if not self.freeze[self.q_index]:
 				# alpha1
-				x[self.q_index] = truncnorm.ppf(u[i], 0.0, 10.0/2.0, loc=1.0, scale=2.0)
+				x[self.q_index] = truncnorm.ppf(u[i], -0.9/2.0, 10.0/2.0, loc=2.0, scale=2.0)
 				i += 1
 			if not self.freeze[self.q_index+1]:
 				# alpha2
-				x[self.q_index+1] = truncnorm.ppf(u[i], 0.0, 10.0/2.0, loc=1.0, scale=2.0)
+				x[self.q_index+1] = truncnorm.ppf(u[i], -0.9/2.0, 10.0/2.0, loc=2.0, scale=2.0)
 				i += 1
 			if not self.freeze[self.q_index+2]:
 				# q0
