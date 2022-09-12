@@ -1368,11 +1368,10 @@ class CMDFitter():
 
 				q_sampler = self.q_distribution_sampler(args)
 
-				q[i] = q_sampler(np.random.rand())
+				# Map (0,1) to (qmin,1)  at this point
+				q[i] = self.q_min + (1.0-self.q_min)*q_sampler(np.random.rand())
 
-		# Map (0,1) to (qmin,1)  at this point
-		qq = self.q_min + q*(1.0-self.q_min)			
-		mag[n_outliers:], colour[n_outliers:] = self.iso.binary(M1[n_outliers:],qq[n_outliers:])
+		mag[n_outliers:], colour[n_outliers:] = self.iso.binary(M1[n_outliers:],q[n_outliers:])
 
 		if add_observational_scatter:
 
@@ -1597,7 +1596,7 @@ class CMDFitter():
 				prior = norm.pdf(log_k,loc=1.7,scale=0.2) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * truncnorm.pdf(gamma, -2.35, 6.0-2.35, loc=2.35, scale=1.0) * \
 								truncnorm.pdf(c0,0.0,1.0/0.05,loc=0.0,scale=0.05) * truncnorm.pdf(c1,0.0,1.0/0.05,loc=0.0,scale=0.05) * \
 								truncnorm.pdf(alpha1, -0.9/2.0, 10.0/2.0, loc=2.0, scale=2.0) * truncnorm.pdf(alpha2, -0.9/2.0, 10.0/2.0, loc=2.0, scale=2.0) * \
-								truncnorm.pdf(q0, -0.45/0.2, 0.45/0.2, loc=0.5, scale=0.2) * truncnorm.pdf(a1, a1min/2.0, a1max/2.0, loc=0.0, scale=2.0) * truncnorm.pdf(a2, a2min/2.0, a2max/2.0, loc=0.0, scale=2.0)
+								truncnorm.pdf(q0, np.max([0.0,(-0.45/(1.0-self.q_min))/0.2]), np.min([1.0,(0.45/(1.0-self.q_min))/0.2]), loc=(0.5-self.q_min)/(1.0-self.q_min), scale=0.2) * truncnorm.pdf(a1, a1min/2.0, a1max/2.0, loc=0.0, scale=2.0) * truncnorm.pdf(a2, a2min/2.0, a2max/2.0, loc=0.0, scale=2.0)
 			else:
 				prior = norm.pdf(b1,loc=0.0,scale=2.0) * norm.pdf(b2,loc=0.0,scale=2.0) * norm.pdf(b3,loc=0.0,scale=2.0) * norm.pdf(b4,loc=0.0,scale=2.0)
 
@@ -1711,7 +1710,8 @@ class CMDFitter():
 				i += 1
 			if not self.freeze[self.q_index+2]:
 				# q0
-				x[self.q_index+2] = truncnorm.ppf(u[i], -0.45/0.2, 0.45/0.2, loc=0.5, scale=0.2)
+				#x[self.q_index+2] = truncnorm.ppf(u[i], -0.45/0.2, 0.45/0.2, loc=0.5, scale=0.2)
+				x[self.q_index+2] = truncnorm.ppf(u[i], np.max([0.0,(-0.45/(1.0-self.q_min))/0.2]), np.min([1.0,(0.45/(1.0-self.q_min))/0.2]), loc=(0.5-self.q_min)/(1.0-self.q_min), scale=0.2)
 				i += 1
 			if not self.freeze[self.q_index+3]:
 				# a1
@@ -1753,7 +1753,7 @@ class CMDFitter():
 
 			if not self.freeze[self.b_index+3]:
 				# log h0
-				logh = truncnorm.ppf(u[i], -0.3/0.2, 0.3/0.1, loc=0.0, scale=0.1)
+				logh = truncnorm.ppf(u[i], -0.3/0.2, 1.0/0.1, loc=0.0, scale=0.1)
 				x[self.b_index+3] = 10.0**logh
 				i += 1
 			if not self.freeze[self.b_index+4]:
