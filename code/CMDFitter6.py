@@ -25,7 +25,7 @@ class Data():
 
 	"""Container class to hold CMD data"""
 
-	def __init__(self,data_dict):
+	def __init__(self,data_dict,data_field=None):
 
 		"""
 		Set up a Data instance.
@@ -51,7 +51,13 @@ class Data():
 
 		print('data definition:',data_dict)
 
-		rawdata = np.loadtxt(data_dict['file'])
+
+		if data_field is None:
+			data_file = data_dict['file']
+		else:
+			data_file = data_dict[data_field]
+
+		rawdata = np.loadtxt(data_file)
 		data = rawdata[~np.isnan(rawdata).any(axis=1),:]
 
 		self.magnitude = data[:,data_dict['column_mag']]
@@ -709,7 +715,7 @@ class PlotUtils():
 		return ax, yq3, yq3-yq2, yq4-yq3
 
 
-	def print_fb_q(fitter,samples,weights=None,ax=None,save_figure=True,plot_file='fb_q.png'):
+	def print_fb_q(fitter,samples,weights,q_dash):
 
 		"""Using all samples, print the implied binary mass-fraction for q' > q along with its 1- and 2-sigma uncertainty."""
 
@@ -717,7 +723,6 @@ class PlotUtils():
 
 		assert isinstance(fitter, CMDFitter)
 
-		q_dash = np.linspace(fitter.q_min,0.9,8)
 		q = (q_dash-fitter.q_min)/(1.0-fitter.q_min)
 
 		sig1 = 0.5 * 68.27
@@ -729,7 +734,7 @@ class PlotUtils():
 		yq4 = np.zeros(101)
 		yq5 = np.zeros(101)
 
-		for j in range(101):
+		for j in range(len(q)):
 
 			y = np.zeros(len(samples))
 
@@ -750,7 +755,7 @@ class PlotUtils():
 			yq4[j] = qq[3]
 			yq5[j] = qq[4]
 
-		return 
+		return yq1, yq2, yq3, yq4, yq5
 
 
 	def plot_prior_fb_q(fitter,n_samples=1000,ax=None,save_figure=True,plot_file='fb_q.png',plot_name=True):
@@ -927,7 +932,7 @@ class CMDFitter():
 		self.citation = "Albrow, M.D., Ulusele, I.H., 2022, MNRAS, 515, 730"
 
 
-		assert q_model in ['power','legendre']
+		assert q_model in ['power','legendre','piecewise']
 		assert m_model in ['power','legendre']
 
 		if q_model == 'power':
@@ -943,6 +948,13 @@ class CMDFitter():
 			self.default_params = np.array([4.0,              0.0,     0.0006,       0.0,       0.0,             0.0,      0.0,      0.0,      0.0,            0.0,            0.0,            0.35,       0.0,        0.01,     1.0,      0.00])
 			self.q_index = 5
 			self.b_index = 11
+
+		if q_model == 'piecewise':
+			self.ndim = 14
+			self.labels =                  [r"$\log_{10} k$", r"$M_0$", r"$\gamma$", r"$c_0$",  r"$\dot{c}_0$", r"$pq_4$",  r"$pq_3$",  r"$pq_2$", r"$pq_1$",  r"$f_B$", r"$\dot{f_B}$", r"$f_O$", r"$h_0$", r"$h_1$"]
+			self.default_params = np.array([4.0,              0.0,     0.0006,       0.0,       0.0,             1.0,        1.0,       1.0,      1.0,         0.35,        0.0,        0.01,     1.0,      0.00])
+			self.q_index = 5
+			self.b_index = 9
 
 		if m_model == 'legendre':
 			self.labels[4] =                              [r"$b_1$", r"$b_2$", r"$b_3$", r"$b_4$"] + self.labels[self.q_index:]
@@ -1000,8 +1012,15 @@ class CMDFitter():
 			data_description = data['data_description']
 			iso_description = data['iso_description']
 			
-			data = Data(data_description)
-			isochrone = Isochrone(iso_description, colour_correction_data=data)
+
+			if 'colour_correction_file' in data:
+				data = Data(data_description)
+				colour_correction_data = Data(data_description,data_field='colour_correction_file')
+			else:
+				data = Data(data_description)
+				colour_correction_data = data
+
+			isochrone = Isochrone(iso_description, colour_correction_data=colour_correction_data)
 
 		else:
 
@@ -1172,7 +1191,7 @@ class CMDFitter():
 
 		"""Evaluate the binary mass-ratio distribution function at x."""
 
-		assert self.q_model in ['power','legendre']
+		assert self.q_model in ['power','legendre','piecewise']
 
 		if self.q_model == 'power':
 			alpha1, alpha2, q0, a1, a2, M = params
@@ -1224,16 +1243,39 @@ class CMDFitter():
 				return qdist[0]
 
 		if self.q_model == 'legendre':
+
 			a1, a2, a3, a1_dot, a2_dot,a3_dot, M = params
 			dM = M-self.M_ref
 			return self.sl_0(x) + (a1+a1_dot*dM)*self.sl_1(x) + (a2+a2_dot*dM)*self.sl_2(x) + (a3+a3_dot*dM)*self.sl_3(x)
 
 
+		if self.q_model == 'piecewise':
+
+			pnode = np.zeros(5)
+			pnode[4], pnode[3], pnode[2], pnode[1], M = params
+
+			delta_q = 1.0/4.0
+			qnode = np.linspace(0,1,5)
+
+			pnode[0] = 2.0/delta_q - 2*(pnode[1]+pnode[2]+pnode[3]) - pnode[4]
+
+			x_arr = np.atleast_1d(x)
+			qdist = np.zeros_like(x_arr)
+
+			for i in range(4):
+				ind = np.where(x_arr >= qnode[i])[0]
+				if ind.any():
+					qdist[ind] = pnode[i] + (x_arr[ind]-qnode[i])*(pnode[i+1]-pnode[i])/(qnode[i+1]-qnode[i]) 
+
+			if type(x) == np.ndarray:
+				return qdist
+			else:
+				return qdist[0]
+
+
 	def q_distribution_sampler(self,params):
 
 		"""Return a function that maps the range (0,1) onto the binary mass-ratio distribution function.""" 
-
-		assert self.q_model in ['power','legendre']
 
 		q = np.linspace(0,1,1001)
 
@@ -1247,7 +1289,7 @@ class CMDFitter():
 
 	def q_distribution_integral(self,params,q1,q2):
 
-		assert self.q_model in ['power','legendre']
+		assert self.q_model in ['power','legendre','piecewise']
 
 		assert np.min([q1,q2]) >= 0.0
 		assert np.max([q1,q2]) <= 1.0
@@ -1279,6 +1321,30 @@ class CMDFitter():
 			else:
 				y -= c*q1 + a1*q0**(alpha1+1.0)/(alpha1+1.0) + a2*(q1-q0)**(alpha2+1.0)/(alpha2+1.0)
 				#y -= 0.5*a1*q0**alpha1/(alpha1+1.0) + 0.5*a2*(2.0*q1-1.0)*(q1-q0)**alpha2/(alpha2+1.0) + c*q1
+
+		if self.q_model == 'piecewise':
+
+			pnode = np.zeros(5)
+			pnode[4], pnode[3], pnode[2], pnode[1] = params
+
+			delta_q = 1.0/4.0
+			qnode = np.linspace(0,1,5)
+
+			pnode[0] = 2.0/delta_q -2*np.sum(pnode[1:-1]) - pnode[-1]
+
+			args = params.tolist() + [self.M_ref]
+
+			integral = np.zeros(2)
+			for j, qq in enumerate([q1,q2]):
+
+				low = np.where(qnode <= qq)[0]
+				integral[j] = 0
+				if low[0] > 1:
+					integral[j] += np.sum(pnode[j]+pnode[j-1])*delta_q/2.0
+				integral[j] += (self.q_distribution(qq,args)+pnode[low[0]])*(qq-qnode[low[0]])/2.0
+
+			y = integral[1] - integral[0]
+
 
 		return y
 
@@ -1320,7 +1386,7 @@ class CMDFitter():
 		Also return 		star_type = 0, 1, 2 for single stars, binaries, outliers.
 		""" 
 
-		assert self.q_model in ['power','legendre']
+		assert self.q_model in ['power','legendre','piecewise']
 
 		fb0, fb1, fo, h0, h1 = p[self.b_index:]
 
@@ -1436,7 +1502,7 @@ class CMDFitter():
 
 	def q_gauss(self,params):
 				
-		"""Return the (positive) coefficients for mapping the mass-ratio basis functions onto the mass-ratio distribution function."""
+		"""Return the (positive) coefficients for mapping the q basis functions onto the q distribution function."""
 
 		qy = self.q_distribution(self.qx,params)
 
@@ -1461,7 +1527,7 @@ class CMDFitter():
 		the grid of (M,q) basis function coefficients (for binary stars). These are multiplied
 		by the single-star and binary-star fractions respectively."""
 
-		assert self.q_model in ['power','legendre']
+		assert self.q_model in ['power','legendre','piecewise']
 
 		fb0, fb1, fo, h0, h1 = params[self.b_index:]
 
@@ -1504,7 +1570,7 @@ class CMDFitter():
 		h0 = p[-2]
 		h1 = p[-1]
 
-		assert self.q_model in ['power','legendre']
+		assert self.q_model in ['power','legendre','piecewise']
 
 		# Check that the parameters generate positive q distributions for all masses, and a positive M distribution.
 
@@ -1567,7 +1633,7 @@ class CMDFitter():
 		p = self.default_params.copy()
 		p[self.freeze==0] = params
 
-		assert self.q_model in ['power','legendre']
+		assert self.q_model in ['power','legendre','piecewise']
 		assert self.m_model in ['power','legendre']
 
 		if self.q_model == 'power':
@@ -1602,7 +1668,7 @@ class CMDFitter():
 
 
 			prior *= truncnorm.pdf(fo, 0.0, 6.0, loc=0.0, scale=self.scale_fo) * \
-						truncnorm.pdf(log_h,-1.0/0.2,1.0/0.2,loc=0.0,scale=0.2) * truncnorm.pdf(h1,0.0,2.0/(0.4*h0),loc=0.0,scale=0.4*h0)
+						truncnorm.pdf(log_h,-0.3/0.2,1.0/0.2,loc=0.0,scale=0.2) * truncnorm.pdf(h1,0.0,2.0/(0.4*h0),loc=0.0,scale=0.4*h0)
 
 		if self.q_model == 'legendre':
 
@@ -1632,7 +1698,38 @@ class CMDFitter():
 			prior *= truncnorm.pdf(fo, 0.0, 6.0, loc=0.0, scale=self.scale_fo) * norm.pdf(a1,loc=0.0,scale=2.0) * \
 							norm.pdf(a1_dot,loc=0.0,scale=0.1/self.delta_M) * \
 							norm.pdf(a2_dot,loc=0.0,scale=0.1/self.delta_M) * norm.pdf(a3_dot,loc=0.0,scale=0.1/self.delta_M) * \
-							truncnorm.pdf(log_h,-1.0/0.2,1.0/0.2,loc=0.0,scale=0.2) * truncnorm.pdf(h1,0.0,2.0/(0.4*h0),loc=0.0,scale=0.4*h0)
+							truncnorm.pdf(log_h,-0.3/0.2,1.0/0.2,loc=0.0,scale=0.2) * truncnorm.pdf(h1,0.0,2.0/(0.4*h0),loc=0.0,scale=0.4*h0)
+
+
+		if self.q_model == 'piecewise':
+
+			if self.m_model == 'power':
+				log_k, M0, gamma, c0, c1, pq4, pq3, pq2, pq1, fb0, fb1, fo, h0, h1 = p
+			else:
+				b1, b2, b3, b4, pq4, pq3, pq2, pq1, fb0, fb1, fo, h0, h1 = p
+
+			fb_end = fb0 + fb1*self.mass_range
+
+
+			if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95:
+				return self.neginf 
+
+			log_h = np.log10(h0)
+
+			if self.m_model == 'power':
+				prior = norm.pdf(log_k,loc=1.7,scale=0.2) * norm.pdf(M0,loc=self.mass_slice[0]+0.1*self.delta_M, scale=0.1*self.delta_M) * truncnorm.pdf(gamma, -2.35, 6.0-2.35, loc=2.35, scale=1.0) * \
+							truncnorm.pdf(c0,0.0,1.0/0.05,loc=0.0,scale=0.05) * truncnorm.pdf(c1,0.0,1.0/0.05,loc=0.0,scale=0.05) 
+
+			else:
+				prior = norm.pdf(b1,loc=0.0,scale=2.0) * norm.pdf(b2,loc=0.0,scale=2.0) * norm.pdf(b3,loc=0.0,scale=2.0) * norm.pdf(b4,loc=0.0,scale=2.0)
+
+
+			sc = 0.5
+			prior *= truncnorm.pdf(fo, 0.0, 6.0, loc=0.0, scale=self.scale_fo) * truncnorm.pdf(pq1,-1.0/sc, 6/sc, loc=1.0, scale=sc) * \
+							truncnorm.pdf(pq2,-1.0/sc, 6.0/sc, loc=1.0, scale=sc) * truncnorm.pdf(pq3,-1.0/sc, 6.0/sc, loc=1.0, scale=sc) * \
+							truncnorm.pdf(pq4,-1.0/sc, 6.0/sc, loc=1.0, scale=sc) * \
+							truncnorm.pdf(log_h,-0.3/0.2,1.0/0.2,loc=0.0,scale=0.2) * truncnorm.pdf(h1,0.0,2.0/(0.4*h0),loc=0.0,scale=0.4*h0)
+
 
 		return np.log(prior)
 
@@ -1644,7 +1741,7 @@ class CMDFitter():
 
 		from scipy.stats import norm, truncnorm
 
-		assert self.q_model in ['power','legendre']
+		assert self.q_model in ['power','legendre','piecewise']
 
 		assert self.m_model in ['power','legendre']
 
@@ -1865,7 +1962,7 @@ class CMDFitter():
 
 			if not self.freeze[self.q_index+9]:
 				# log h0
-				logh = truncnorm.ppf(u[i], -0.3/0.1, 0.3/0.1, loc=0.0, scale=0.1)
+				logh = truncnorm.ppf(u[i], -0.3/0.1, 1.0/0.1, loc=0.0, scale=0.1)
 				x[self.q_index+9] = 10.0**logh
 				i += 1
 			if not self.freeze[self.q_index+10]:
@@ -1873,6 +1970,110 @@ class CMDFitter():
 				scale = 0.4*x[self.q_index+9]/self.delta_M
 				x[self.q_index+10] = truncnorm.ppf(u[i], 0.0/scale, 2.0/scale, loc=0.0, scale=scale)
 				i += 1
+
+
+		if self.q_model == 'piecewise':
+
+
+			# params are log k, M0, gamma, c0, c1,  pq4, pq3, pq2, pq1, fb0, fb1, fo, h0, h1
+
+			i = 0
+
+			if self.m_model == 'power':
+
+				if not self.freeze[0]:
+					# log k
+					x[0] = norm.ppf(u[i], loc=1.7, scale=0.2)
+					i += 1
+				if not self.freeze[1]:
+					# M0
+					x[1] = norm.ppf(u[i], loc=self.mass_slice[0]+0.1,scale=0.1)
+					i += 1
+				if not self.freeze[2]:
+					# gamma
+					x[2] = truncnorm.ppf(u[i], -2.35, 6.0-2.35, loc=2.35, scale=1.0)
+					i += 1
+				if not self.freeze[3]:
+					# c0
+					x[3] = truncnorm.ppf(u[i],0.0,1.0/0.05,loc=0.0,scale=0.05)
+					i += 1
+				if not self.freeze[4]:
+					# c1
+					x[4] = truncnorm.ppf(u[i],0.0,1.0/0.05,loc=0.0,scale=0.05)
+					i += 1
+
+			else:
+
+				if not self.freeze[0]:
+					# b1
+					x[0] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[1]:
+					# b2
+					x[1] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[2]:
+					# b3
+					x[2] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+				if not self.freeze[3]:
+					# b4
+					x[3] = norm.ppf(u[i], loc=0.0, scale=2.0)
+					i += 1
+
+
+			if not self.freeze[self.q_index]:
+				# pq4
+				sc = 0.5
+				x[self.q_index] = truncnorm.ppf(u[i], -1.0/sc, 3.99/sc, loc=1.0, scale=sc)
+				i += 1
+			if not self.freeze[self.q_index+1]:
+				# pq3
+				delta_q = 1.0/4.0
+				pmax = 1.0/delta_q - x[self.q_index]/2.0 
+				x[self.q_index+1] = truncnorm.ppf(u[i], -1.0/sc, (pmax-1.0)/sc, loc=1.0, scale=sc)
+				q_int = delta_q * (x[self.q_index] + x[self.q_index+1])/2.0
+				i += 1
+			if not self.freeze[self.q_index+2]:
+				# pq2
+				pmax = (1.0-q_int)/delta_q - x[self.q_index+1]/2.0
+				x[self.q_index+2] = truncnorm.ppf(u[i], -1.0/sc, (pmax-1.0)/sc, loc=1.0, scale=sc)
+				q_int += delta_q * (x[self.q_index+1] + x[self.q_index+2])/2.0
+				i += 1
+			if not self.freeze[self.q_index+3]:
+				# pq1
+				pmax = (1.0-q_int)/delta_q - x[self.q_index+2]/2.0
+				x[self.q_index+3] = truncnorm.ppf(u[i], -1.0/sc, (pmax-1.0)/sc, loc=1.0, scale=sc)
+				q_int += delta_q * (x[self.q_index+2] + x[self.q_index+3])/2.0
+				i += 1
+
+			if not self.freeze[self.b_index]:
+				# fB0
+				x[self.b_index] = 0.93*u[i] + 0.02
+				i += 1
+			if not self.freeze[self.b_index+1]:
+				# fB1
+				fb1max = np.min([0.1/self.mass_range,(0.95-x[self.b_index])/self.mass_range])
+				fb1min = np.max([-0.1/self.mass_range,-(x[self.b_index]-0.02)/self.mass_range])
+				x[self.b_index+1] = truncnorm.ppf(u[i], fb1min/0.1, fb1max/0.1, loc=0.0, scale=0.1)
+				i += 1
+			if not self.freeze[self.b_index+2]:
+				# f_O
+				x[self.b_index+2] = truncnorm.ppf(u[i], 0.0, 6.0, loc=0.0, scale=self.scale_fo)
+				i += 1
+
+			if not self.freeze[self.b_index+3]:
+				# log h0
+				logh = truncnorm.ppf(u[i], -0.3/0.2, 1.0/0.1, loc=0.0, scale=0.1)
+				x[self.b_index+3] = 10.0**logh
+				i += 1
+			if not self.freeze[self.b_index+4]:
+				# h1
+				scale = 0.4*x[self.b_index+3]/self.delta_M
+				x[self.b_index+4] = truncnorm.ppf(u[i], 0.0, 2.0*x[self.b_index+3]/scale, loc=0.0, scale=scale)
+				i += 1
+
+
 
 		y = x[self.freeze==0]
 
