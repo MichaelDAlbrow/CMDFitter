@@ -1324,6 +1324,14 @@ class CMDFitter():
 
 		if self.q_model == 'piecewise':
 
+
+			if q2 <= q1:
+				return 0.0
+
+			def integral_within_bin(qa,qb,qlow,qhigh,plow,phigh):
+				s = (phigh-plow)/(qhigh-qlow)
+				return (plow-s*qlow)*(qb-qa) + 0.5*s*(qb**2 - qa**2)
+
 			pnode = np.zeros(5)
 			pnode[4], pnode[3], pnode[2], pnode[1] = params
 
@@ -1332,19 +1340,47 @@ class CMDFitter():
 
 			pnode[0] = 2.0/delta_q -2*np.sum(pnode[1:-1]) - pnode[-1]
 
-			args = params.tolist() + [self.M_ref]
+			#pnode = np.flip(pnode)
+			#qnode = np.flip(qnode)
 
-			integral = np.zeros(2)
-			for j, qq in enumerate([q1,q2]):
+			#print("q1,q2",q1,q2)
+			#print("qnode",qnode)
+			#print("pnode",pnode)
 
-				low = np.where(qnode <= qq)[0]
-				integral[j] = 0
-				if low[0] > 1:
-					integral[j] += np.sum(pnode[j]+pnode[j-1])*delta_q/2.0
-				integral[j] += (self.q_distribution(qq,args)+pnode[low[0]])*(qq-qnode[low[0]])/2.0
+			ind = np.where(q1 - qnode >= 0.0)[0][-1]
+			q1low = qnode[ind]
+			p1low = pnode[ind]
+			q1high = qnode[ind+1]
+			p1high = pnode[ind+1]
+			#print("ind,q1low,q1high,p1low,p1high",ind,q1low,q1high,p1low,p1high)
+			ind = np.where(q2 - qnode > 0.0)[0][-1]
+			q2low = qnode[ind]
+			p2low = pnode[ind]
+			q2high = qnode[ind+1]
+			p2high = pnode[ind+1]
+			#print("ind,q2low,q2high,p2low,p2high",ind,q2low,q2high,p2low,p2high)
 
-			y = integral[1] - integral[0]
 
+
+			if q1low == q2low:
+
+				y = integral_within_bin(q1,q2,q1low,q1high,p1low,p1high)
+				#print("y",y)
+
+			else:
+
+				y = integral_within_bin(q1,q1high,q1low,q1high,p1low,p1high)
+				#print("y",y)
+
+				ind = np.where(qnode == q1high)[0]
+				while qnode[ind] < q2low:
+					s = (pnode[ind+1]-pnode[ind])/(qnode[ind+1]-qnode[ind])
+					y += (pnode[ind]-s*qnode[ind])*(qnode[ind+1]-qnode[ind]) + 0.5*s*(qnode[ind+1]**2 - qnode[ind]**2)
+					ind += 1
+					#print("y",y)
+
+				y += integral_within_bin(q2low,q2,q2low,q2high,p2low,p2high)
+				#print("y",y)
 
 		return y
 
