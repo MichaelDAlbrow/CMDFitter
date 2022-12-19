@@ -167,7 +167,7 @@ __device__ double outlier_likelihood(double *info, double *Dk, double f_outlier)
 }
 
 
-__device__ void single_likelihood(double h, double *Dk, double Sk[2][2], double *PM, double *result){
+__device__ void single_likelihood(int htype, double h, double *Dk, double Sk[2][2], double *PM, double *result){
 	
 	int nMB = 50;
 
@@ -183,9 +183,16 @@ __device__ void single_likelihood(double h, double *Dk, double Sk[2][2], double 
     	D[1] = Dk[1] - tex2D(DMQ,i,1);
 
 		S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
-		S[0][1] = h*h*Sk[0][1] + tex2D(SMQ,i,1);
-		S[1][0] = h*h*Sk[1][0] + tex2D(SMQ,i,2);
-		S[1][1] = h*h*Sk[1][1] + tex2D(SMQ,i,3);
+
+		if (htype == 1) {
+			S[0][1] = h*h*Sk[0][1] + tex2D(SMQ,i,1);
+			S[1][0] = h*h*Sk[1][0] + tex2D(SMQ,i,2);
+			S[1][1] = h*h*Sk[1][1] + tex2D(SMQ,i,3);
+		} else {
+			S[0][1] = Sk[0][1] + tex2D(SMQ,i,1);
+			S[1][0] = Sk[1][0] + tex2D(SMQ,i,2);
+			S[1][1] = Sk[1][1] + tex2D(SMQ,i,3);		
+		}
 
 	    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
 
@@ -223,7 +230,7 @@ __device__ void single_likelihood(double h, double *Dk, double Sk[2][2], double 
 }
 
 
-__device__ void binary_likelihood(double h, double *Dk, double Sk[2][2], double *PMQ, double *result){
+__device__ void binary_likelihood(int htype, double h, double *Dk, double Sk[2][2], double *PMQ, double *result){
 	
 	int nMB = 50;
 	int nQB = 50;
@@ -240,9 +247,16 @@ __device__ void binary_likelihood(double h, double *Dk, double Sk[2][2], double 
     	D[1] = Dk[1] - tex2D(DMQ,i,1);
 
 		S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
-		S[0][1] = h*h*Sk[0][1] + tex2D(SMQ,i,1);
-		S[1][0] = h*h*Sk[1][0] + tex2D(SMQ,i,2);
-		S[1][1] = h*h*Sk[1][1] + tex2D(SMQ,i,3);
+
+		if (htype == 1) {
+			S[0][1] = h*h*Sk[0][1] + tex2D(SMQ,i,1);
+			S[1][0] = h*h*Sk[1][0] + tex2D(SMQ,i,2);
+			S[1][1] = h*h*Sk[1][1] + tex2D(SMQ,i,3);
+		} else {
+			S[0][1] = Sk[0][1] + tex2D(SMQ,i,1);
+			S[1][0] = Sk[1][0] + tex2D(SMQ,i,2);
+			S[1][1] = Sk[1][1] + tex2D(SMQ,i,3);
+		}
 
 	    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
 
@@ -276,7 +290,7 @@ __device__ void binary_likelihood(double h, double *Dk, double Sk[2][2], double 
 
 
 
-__global__ void likelihood(double *PM_single, double *PMQ_binary, double *outlier_info, double h0, double h1, double h_magnitude_ref, double f_outlier, double *lnp_k){
+__global__ void likelihood(double *PM_single, double *PMQ_binary, double *outlier_info, int htype, double h0, double h1, double h_magnitude_ref, double f_outlier, double *lnp_k){
 
 
 	int k = blockIdx.x;
@@ -285,7 +299,7 @@ __global__ void likelihood(double *PM_single, double *PMQ_binary, double *outlie
 
 	double Sk[2][2], Dk[2];
 
-    Dk[0] = tex2D(data,k,0);
+	Dk[0] = tex2D(data,k,0);
     Dk[1] = tex2D(data,k,1);
 
     //Sk[0][0] = tex3D(cov,k,0,0);
@@ -307,12 +321,12 @@ __global__ void likelihood(double *PM_single, double *PMQ_binary, double *outlie
 	__syncthreads();
 
 	double l_single = 0.0;
-	single_likelihood(h, Dk, Sk, PM_single, &l_single);
+	single_likelihood(htype, h, Dk, Sk, PM_single, &l_single);
 
 	__syncthreads();
 
 	double l_binary;
-	binary_likelihood(h, Dk, Sk, PMQ_binary, &l_binary);
+	binary_likelihood(htype, h, Dk, Sk, PMQ_binary, &l_binary);
 
 	__syncthreads();
 

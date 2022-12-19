@@ -10,7 +10,7 @@ from statsmodels.stats.weightstats import DescrStatsW
 
 from itertools import chain, combinations
 
-sys.path.append(os.path.abspath(os.path.dirname(__file__))+'/../code_new')
+sys.path.append(os.path.abspath(os.path.dirname(__file__))+'/../code')
 
 
 from CMDFitter import CMDFitter
