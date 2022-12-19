@@ -663,9 +663,6 @@ class CMDFitter():
 
 		mag[n_outliers:], colour[n_outliers:] = self.iso.binary(M1[n_outliers:],q[n_outliers:])
 
-		m0, c0 = self.iso.binary(M1,np.zeros_like(M1))
-
-
 		if add_observational_scatter:
 
 			h = h0 + h1*(mag-self.h_magnitude_ref)
@@ -871,7 +868,7 @@ class CMDFitter():
 		assert self.q_model in ['power','legendre','piecewise','hist']
 		assert self.m_model in ['power']
 
-		ln_p = self.ln_prior_mass_power(p[:q_index])
+		lnp = self.ln_prior_mass_power(p[:self.q_index])
 
 		if self.q_model == 'power':
 
@@ -1249,9 +1246,8 @@ class CMDFitter():
 		if np.min([fb0,fb_end]) < 0.02 or np.max([fb0,fb_end]) > 0.95:
 			return self.neginf 
 
-		fb1max = np.min([0.1/self.mass_range,(0.95-x[self.b_index])/self.mass_range])
-		fb1min = np.max([-0.1/self.mass_range,-(x[self.b_index]-0.02)/self.mass_range])
-		x[self.b_index+1] = truncnorm.ppf(u[i], fb1min/0.1, fb1max/0.1, loc=0.0, scale=0.1)
+		fb1max = np.min([0.1/self.mass_range,(0.95-fb0)/self.mass_range])
+		fb1min = np.max([-0.1/self.mass_range,-(fb0-0.02)/self.mass_range])
 
 		log_h = np.log10(h0)
 
