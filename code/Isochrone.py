@@ -1,8 +1,9 @@
 import sys
 import os
 import numpy as np
-from scipy.interpolate import PchipInterpolator
+#import cunumeric as np
 
+from scipy.interpolate import PchipInterpolator
 
 import matplotlib
 matplotlib.use("Agg")
@@ -50,63 +51,98 @@ class Isochrone():
 		cut = np.where((iso_data[:,isochrone_dict['column_blue']]-iso_data[:,isochrone_dict['column_red']])>0.0)[0]
 		iso_data = iso_data[cut]
 
-		self.magnitude = iso_data[:,isochrone_dict['column_mag']] + isochrone_dict['magnitude_offset']
-		self.colour = iso_data[:,isochrone_dict['column_blue']] - iso_data[:,isochrone_dict['column_red']] + isochrone_dict['colour_offset']
+		self.file_magnitude = iso_data[:,isochrone_dict['column_mag']] + isochrone_dict['magnitude_offset']
+		self.file_colour = iso_data[:,isochrone_dict['column_blue']] - iso_data[:,isochrone_dict['column_red']] + isochrone_dict['colour_offset']
 		self.colour_offset = isochrone_dict['colour_offset']
+
+		assert correction_type in ['colour','magnitude']
+		self.correction_type = correction_type
 
 		self.magnitude_min = isochrone_dict['magnitude_min']
 		self.magnitude_max = isochrone_dict['magnitude_max']
 
 
+		pts = np.where((self.file_magnitude > isochrone_dict['magnitude_min']) & (self.file_magnitude < isochrone_dict['magnitude_max']))[0]
+
+		self.file_magnitude = self.file_magnitude[pts]
+		self.file_colour = self.file_colour[pts]
+
+		self.magnitude = self.file_magnitude
+		self.colour = self.file_colour 
+
 		if isochrone_correction_data is not None:
 
-			self.colour_correction = self.colour_correction_interpolator(isochrone_correction_data)
-			self.magnitude_correction = self.magnitude_correction_interpolator(isochrone_correction_data)
+			self.isochrone_correction_data = isochrone_correction_data 
+			result = self.colour_correction_interpolator(isochrone_correction_data)
+			self.colour_correction = result['interpolator']
+			self.initial_colour_correction_offsets = result['fit_data']
+			result = self.magnitude_correction_interpolator(isochrone_correction_data)
+			self.magnitude_correction = result['interpolator']
+			self.initial_magnitude_correction_offsets = result['fit_data']
 
 		else:
 
 			self.colour_correction = lambda x: x*0.0
 			self.magnitude_correction = lambda x: x*0.0
+			self.initial_colour_correction_offsets = None
+			self.initial_magnitude_correction_offsets = None
 
+		if correction_type == 'magnitude':
+			self.magnitude += self.magnitude_correction(self.colour)
+			# This dummy call is to make the luminosity function
+			_ = self.colour_correction(self.magnitude)
+		else:
+			self.colour += self.colour_correction(self.magnitude)
+
+		ind = np.argsort(self.colour)
+		self.colour_mag_interp = PchipInterpolator(self.colour[ind],self.magnitude[ind])
+
+		ind = np.argsort(self.magnitude)
+		self.mag_colour_interp = PchipInterpolator(self.magnitude[ind],self.colour[ind])
 
 		iso_red = iso_data[:,isochrone_dict['column_red']]
 		iso_blue = iso_data[:,isochrone_dict['column_blue']]
 		iso_M = iso_data[:,isochrone_dict['column_mass']]
 
-		pts = np.where((self.magnitude > isochrone_dict['magnitude_min']) & (self.magnitude < isochrone_dict['magnitude_max']))[0]
+		self.M = iso_M[pts]
+		self.M_increasing = np.hstack((np.array([0.0]),iso_M[pts]+1.0e-6*np.arange(len(pts))))
 
-		self.magnitude[pts] += self.magnitude_correction(self.colour[pts])
+		self.mag_M_interp = PchipInterpolator(self.magnitude[ind],self.M[ind])
 
-		ind = np.argsort(self.magnitude[pts])
-		self.mag_M_interp = PchipInterpolator(self.magnitude[pts][ind],iso_M[pts][ind])
-
-		iso_M_increasing = np.hstack((0.0,iso_M[pts]+1e-6*np.arange(len(pts))))
-
-		self.M_mag_interp = PchipInterpolator(iso_M_increasing,np.hstack((self.magnitude[0]+10,self.magnitude[pts])))
-		self.M_red_interp = PchipInterpolator(iso_M_increasing,np.hstack((iso_red[0]+10,iso_red[pts])))
-		self.M_blue_interp = PchipInterpolator(iso_M_increasing,np.hstack((iso_blue[0]+16,iso_blue[pts])))
-
-
-		assert correction_type in ['colour','magnitude']
-		self.correction_type = correction_type
-
-		if correction_type == 'colour':
-			colour = self.colour[pts]+self.colour_correction(self.magnitude[pts])
-		else:
-			# This dummy call is to make the luminosity function
-			colour = self.colour[pts]
-			_ = self.colour_correction(self.magnitude[pts])
-
-		mag = self.magnitude[pts]
-
-		ind = np.argsort(colour)
-		self.colour_mag_interp = PchipInterpolator(colour[ind],mag[ind])
-		ind = np.argsort(mag)
-		self.mag_colour_interp = PchipInterpolator(mag[ind],colour[ind])
+		self.M_mag_interp = PchipInterpolator(self.M_increasing,np.hstack((np.array([self.magnitude[0]+10.0]),self.magnitude)))
+		self.M_red_interp = PchipInterpolator(self.M_increasing,np.hstack((np.array([iso_red[0]+10.0]),iso_red[pts])))
+		self.M_blue_interp = PchipInterpolator(self.M_increasing,np.hstack((np.array([iso_blue[0]+16.0]),iso_blue[pts])))
 
 		self.plot_luminosity_mass_functions(isochrone_correction_data)
 
-		return
+
+
+	def recompute(self,offsets):
+
+		"""Recompute the isochrone correction from the given colur or magnitude offsets."""
+
+		if self.correction_type == 'colour':
+			isochrone_correction_data = (self.initial_colour_correction_offsets[0],offsets)
+			result = self.colour_correction_interpolator(self.isochrone_correction_data,ridge_offset_data=isochrone_correction_data,plot=False)
+			self.colour_correction = result['interpolator']
+			self.colour = self.file_colour + self.colour_correction(self.magnitude)
+
+		else:
+			isochrone_correction_data = (self.initial_magnitude_correction_offsets[0],offsets)
+			result = self.magnitude_correction_interpolator(self.isochrone_correction_data,ridge_offset_data=isochrone_correction_data,plot=False)
+			self.magnitude_correction = result['interpolator']
+			self.magnitude = self.file_magnitude + self.magnitude_correction(self.colour)
+
+		ind = np.argsort(self.colour)
+		self.colour_mag_interp = PchipInterpolator(self.colour[ind],self.magnitude[ind])
+
+		ind = np.argsort(self.magnitude)
+		self.mag_colour_interp = PchipInterpolator(self.magnitude[ind],self.colour[ind])
+		self.mag_M_interp = PchipInterpolator(self.magnitude[ind],self.M[ind])
+
+		self.M_mag_interp = PchipInterpolator(self.M_increasing,np.hstack((self.magnitude[0]+10,self.magnitude)))
+
+
 
 	@staticmethod
 	def hist_peak(x):
@@ -151,7 +187,7 @@ class Isochrone():
 		return np.mean(xx)
 
 
-	def magnitude_correction_interpolator(self,data,plot=True,plot_file='magnitude_correction.png',plot_binary_sequence=True,plot_triple_sequence=True):
+	def magnitude_correction_interpolator(self,data,plot=True,plot_file='magnitude_correction.png',plot_binary_sequence=True,plot_triple_sequence=True,ridge_offset_data=None):
 
 		"""Return a function that computes a magnitude-correction (as a function of colour) to be added to the
 		isochrone in order to match the main-sequence ridge line."""
@@ -163,52 +199,62 @@ class Isochrone():
 		index = np.argsort(self.magnitude)
 		iso_colour_interp = PchipInterpolator(self.magnitude[index],self.colour[index])
 
-		q = np.where(self.magnitude > data.magnitude_min)[0]
-		index = np.argsort(self.colour[q])
-		iso_mag_interp = PchipInterpolator(self.colour[q][index]+1.e-6*np.arange(len(index)),self.magnitude[q][index])
-		data_delta = data.colour - iso_colour_interp(data.magnitude)
+		result = {}
 
-		nbins = np.int(1*(data.magnitude_max - data.magnitude_min+2) + 0.5)
+		if ridge_offset_data is None:
 
-		y = -9999*np.ones(nbins)
-		luminosity_function = np.empty(nbins)
+			q = np.where(self.magnitude > data.magnitude_min)[0]
+			index = np.argsort(self.colour[q])
+			iso_mag_interp = PchipInterpolator(self.colour[q][index]+1.e-6*np.arange(len(index)),self.magnitude[q][index])
+			data_delta = data.colour - iso_colour_interp(data.magnitude)
 
-		edges = np.linspace(data.magnitude_min-1.0,data.magnitude_max+1.0,nbins+1)
-		centres = 0.5*(edges[1:]+edges[:-1])
+			nbins = int(1*(data.magnitude_max - data.magnitude_min+2) + 0.5)
 
-		print('edges',edges)
+			y = -9999*np.ones(nbins)
+			luminosity_function = np.empty(nbins)
 
-		for i in range(nbins):
+			edges = np.linspace(data.magnitude_min-1.0,data.magnitude_max+1.0,nbins+1)
+			centres = 0.5*(edges[1:]+edges[:-1])
 
-			pts = np.where((data.magnitude > edges[i]) & (data.magnitude <= edges[i+1]))[0]
+			print('edges',edges)
 
-			print('centre mag, npts:',centres[i],len(pts))
+			for i in range(nbins):
 
-			luminosity_function[i] = len(pts)
+				pts = np.where((data.magnitude > edges[i]) & (data.magnitude <= edges[i+1]))[0]
 
-			if len(pts) > 4:
+				print('centre mag, npts:',centres[i],len(pts))
 
-				#y[i] = self.hist_peak(data_delta[pts])
-				y[i] = self.median_peak(data_delta[pts])
+				luminosity_function[i] = len(pts)
 
-		good = y > -100
-		iso_col = iso_colour_interp(centres[good])
-		col = iso_col + y[good]
+				if len(pts) > 4:
 
-		print('col',col)
+					#y[i] = self.hist_peak(data_delta[pts])
+					y[i] = self.median_peak(data_delta[pts])
 
-		delta_mag = centres[good] - iso_mag_interp(col)
+			good = y > -100
+			iso_col = iso_colour_interp(centres[good])
+			col = iso_col + y[good]
 
-		print('mag, iso_col, col, delta_mag')
-		print(centres[good])
-		print(iso_col)
-		print(col)
-		print(delta_mag)
+			print('col',col)
 
-		delta_interp = PchipInterpolator(col,delta_mag)
+			delta_mag = centres[good] - iso_mag_interp(col)
 
-		self.lf_centres = centres
-		self.lf_n = luminosity_function
+			print('mag, iso_col, col, delta_mag')
+			print(centres[good])
+			print(iso_col)
+			print(col)
+			print(delta_mag)
+
+			result['interpolator'] = PchipInterpolator(col,delta_mag)
+			result['fit_data'] = col,delta_mag
+
+			self.lf_centres = centres
+			self.lf_n = luminosity_function
+
+		else:
+
+			result['interpolator'] = PchipInterpolator(ridge_offset_data[0],ridge_offset_data[1])
+			result['fit_data'] = ridge_offset_data
 
 		if plot:
 
@@ -218,22 +264,22 @@ class Isochrone():
 			xmag = np.linspace(self.magnitude_min,self.magnitude_max,1001)
 			ax.plot(iso_colour_interp(xmag),xmag,'b--',alpha=0.7)
 			xcol = iso_colour_interp(xmag)
-			ax.plot(xcol,xmag+delta_interp(xcol),'r-',alpha=0.7)
-			print('xcol,xmag,delta_interp',xcol[-5:],xmag[-5:],delta_interp(xcol[-5:]))
+			ax.plot(xcol,xmag+result['interpolator'](xcol),'r-',alpha=0.7)
+			print('xcol,xmag,delta_interp',xcol[-5:],xmag[-5:],result['interpolator'](xcol[-5:]))
 			if plot_binary_sequence:
-				ax.plot(xcol,xmag+delta_interp(xcol)-0.753,'r-',alpha=0.7)
+				ax.plot(xcol,xmag+result['interpolator'](xcol)-0.753,'r-',alpha=0.7)
 			if plot_triple_sequence:
-				ax.plot(xcol,xmag+delta_interp(xcol)-1.193,'r-',alpha=0.7)
+				ax.plot(xcol,xmag+result['interpolator'](xcol)-1.193,'r-',alpha=0.7)
 			ax.set_xlabel(data.colour_label)
 			ax.set_ylabel(data.magnitude_label)
 			ax.set_ylim([data.magnitude_max+1,data.magnitude_min-1])
 			ax.set_xlim([np.min(xcol)-0.25,np.max(xcol)+0.5])
 			plt.savefig(plot_file)
 
-		return delta_interp
+		return result
 
 
-	def colour_correction_interpolator(self,data,plot=True,plot_file='colour_correction.png',plot_binary_sequence=True):
+	def colour_correction_interpolator(self,data,plot=True,plot_file='colour_correction.png',plot_binary_sequence=True,ridge_offset_data=None):
 
 		"""Return a function that computes a colour-correction (as a function of magnitude) to be added to the
 		isochrone in order to match the main-sequence ridge line."""
@@ -245,30 +291,40 @@ class Isochrone():
 		iso_colour_interp = PchipInterpolator(self.magnitude[index],self.colour[index])
 		data_delta = data.colour - iso_colour_interp(data.magnitude)
 
-		nbins = np.int(1*(data.magnitude_max - data.magnitude_min) + 0.5)
+		result = {}
 
-		y = -9999*np.ones(nbins)
-		luminosity_function = np.empty(nbins)
+		if ridge_offset_data is None:
 
-		edges = np.linspace(data.magnitude_min,data.magnitude_max,nbins+1)
-		centres = 0.5*(edges[1:]+edges[:-1])
+			nbins = int(1*(data.magnitude_max - data.magnitude_min) + 0.5)
+
+			y = -9999*np.ones(nbins)
+			luminosity_function = np.empty(nbins)
+
+			edges = np.linspace(data.magnitude_min,data.magnitude_max,nbins+1)
+			centres = 0.5*(edges[1:]+edges[:-1])
 
 
-		for i in range(nbins):
+			for i in range(nbins):
 
-			pts = np.where((data.magnitude > edges[i]) & (data.magnitude <= edges[i+1]))[0]
-			luminosity_function[i] = len(pts)
+				pts = np.where((data.magnitude > edges[i]) & (data.magnitude <= edges[i+1]))[0]
+				luminosity_function[i] = len(pts)
 
-			if len(pts) > 4:
-				#y[i] = self.hist_peak(data_delta[pts])
-				y[i] = self.median_peak(data_delta[pts])
+				if len(pts) > 4:
+					#y[i] = self.hist_peak(data_delta[pts])
+					y[i] = self.median_peak(data_delta[pts])
 
-		good = y > -100
+			good = y > -100
 
-		delta_interp = PchipInterpolator(centres[good],y[good])
+			result['interpolator'] = PchipInterpolator(centres[good],y[good])
+			result['fit_data'] = [centres[good],y[good]]
 
-		self.lf_centres = centres
-		self.lf_n = luminosity_function
+			self.lf_centres = centres
+			self.lf_n = luminosity_function
+
+		else:
+
+			result['interpolator'] = PchipInterpolator(ridge_offset_data[0],ridge_offset_data[1])
+			result['fit_data'] = ridge_offset_data
 
 		if plot:
 
@@ -277,16 +333,16 @@ class Isochrone():
 			ax.scatter(data.colour,data.magnitude,marker='.',c='k',s=0.2)
 			xmag = np.linspace(self.magnitude_min,self.magnitude_max,1001)
 			ax.plot(iso_colour_interp(xmag),xmag,'b--',alpha=0.7)
-			ax.plot(iso_colour_interp(xmag)+delta_interp(xmag),xmag,'r-',alpha=0.7)
+			ax.plot(iso_colour_interp(xmag)+result['interpolator'](xmag),xmag,'r-',alpha=0.7)
 			if plot_binary_sequence:
-				ax.plot(iso_colour_interp(xmag)+delta_interp(xmag),xmag-0.75,'r-',alpha=0.7)
+				ax.plot(iso_colour_interp(xmag)+result['interpolator'](xmag),xmag-0.75,'r-',alpha=0.7)
 			ax.set_xlabel(data.colour_label)
 			ax.set_ylabel(data.magnitude_label)
 			ax.set_ylim([data.magnitude_max+1,data.magnitude_min-1])
-			ax.set_xlim([np.min(iso_colour_interp(xmag))-0.25,np.max(iso_colour_interp(xmag)+delta_interp(xmag))+0.5])
+			ax.set_xlim([np.min(iso_colour_interp(xmag))-0.25,np.max(iso_colour_interp(xmag)+result['interpolator'](xmag))+0.5])
 			plt.savefig(plot_file)
 
-		return delta_interp
+		return result
 
 
 
@@ -364,7 +420,72 @@ class Isochrone():
 		red = self.flux_to_mag(self.mag_to_flux(red1) + self.mag_to_flux(red2))
 
 		if self.correction_type == 'colour':
-			return mag, blue - red + self.colour_correction(mag) + self.colour_offset
+			return mag, blue - red + self.colour_correction(mag1) + self.colour_offset
+			#return mag, blue - red + self.colour_offset
+		else:
+			return mag, blue - red + self.colour_offset
+
+
+	def binary_mesh(self,M,q):
+
+		"""
+		Returns the magnitude and colour (2 D arrays) for binary systems with primary mass M and mass ratio q (both 1D arrays).
+		Both return arrays are indexed as (q,M)
+		"""
+
+		M_grid, q_grid = np.meshgrid(M,q)  # indexing is (q,M)
+
+		M1 = M
+		M2 = q_grid*M_grid
+
+		mag1 = self.M_mag_interp(M1)
+		mag2 = self.M_mag_interp(M2)
+
+		blue1 = self.M_blue_interp(M1)
+		blue2 = self.M_blue_interp(M2)
+
+		red1 = self.M_red_interp(M1)
+		red2 = self.M_red_interp(M2)
+
+
+		mag = self.flux_to_mag(self.mag_to_flux(mag1) + self.mag_to_flux(mag2))
+		blue = self.flux_to_mag(self.mag_to_flux(blue1) + self.mag_to_flux(blue2))
+		red = self.flux_to_mag(self.mag_to_flux(red1) + self.mag_to_flux(red2))
+
+		if self.correction_type == 'colour':
+			return mag, blue - red + self.colour_correction(mag1) + self.colour_offset
+		else:
+			return mag, blue - red + self.colour_offset
+
+
+
+
+	def triple(self,M,q1,q2):
+
+		#Returns the magnitude and colour for a triple system with primary mass M and mass ratios q1, q2.
+
+		M1 = M
+		M2 = q1*M
+		M3 = q2*M
+
+		mag1 = self.M_mag_interp(M1)
+		mag2 = self.M_mag_interp(M2)
+		mag3 = self.M_mag_interp(M3)
+
+		blue1 = self.M_blue_interp(M1)
+		blue2 = self.M_blue_interp(M2)
+		blue3 = self.M_blue_interp(M3)
+
+		red1 = self.M_red_interp(M1)
+		red2 = self.M_red_interp(M2)
+		red3 = self.M_red_interp(M3)
+
+		mag = self.flux_to_mag(self.mag_to_flux(mag1) + self.mag_to_flux(mag2) + self.mag_to_flux(mag3))
+		blue = self.flux_to_mag(self.mag_to_flux(blue1) + self.mag_to_flux(blue2) + self.mag_to_flux(blue3))
+		red = self.flux_to_mag(self.mag_to_flux(red1) + self.mag_to_flux(red2) + self.mag_to_flux(red3))
+
+		if self.correction_type == 'colour':
+			return mag, blue - red + self.colour_correction(mag1) + self.colour_offset
 		else:
 			return mag, blue - red + self.colour_offset
 

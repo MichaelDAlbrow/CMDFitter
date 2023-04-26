@@ -177,39 +177,55 @@ __device__ void single_likelihood(int htype, double h, double *Dk, double Sk[2][
 
     lnp[threadIdx.x] = -1.e50;
 
-    for (int i = threadIdx.x; i<nMB; i+= blockDim.x){
+	if (htype == 1) {
 
-	    D[0] = Dk[0] - tex2D(DMQ,i,0);
-    	D[1] = Dk[1] - tex2D(DMQ,i,1);
+	    for (int i = threadIdx.x; i<nMB; i+= blockDim.x){
 
-		S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
+		    D[0] = Dk[0] - tex2D(DMQ,i,0);
+	    	D[1] = Dk[1] - tex2D(DMQ,i,1);
 
-		if (htype == 1) {
+			S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
 			S[0][1] = h*h*Sk[0][1] + tex2D(SMQ,i,1);
 			S[1][0] = h*h*Sk[1][0] + tex2D(SMQ,i,2);
 			S[1][1] = h*h*Sk[1][1] + tex2D(SMQ,i,3);
-		} else {
-			S[0][1] = Sk[0][1] + tex2D(SMQ,i,1);
-			S[1][0] = Sk[1][0] + tex2D(SMQ,i,2);
-			S[1][1] = Sk[1][1] + tex2D(SMQ,i,3);		
+
+		    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
+
+			invS[0][0] = S[1][1] / detS;
+			invS[1][1] = S[0][0] / detS;
+			invS[0][1] = -S[1][0] / detS;
+			invS[1][0] = -S[0][1] / detS;
+
+			DSD = D[0]*(invS[0][0]*D[0] + invS[0][1]*D[1]) + D[1]*(invS[1][0]*D[0] + invS[1][1]*D[1]);
+
+			lnp[threadIdx.x] = logaddexp(lnp[threadIdx.x],-0.5*DSD + log(PM[i]) - 0.5*log(detS));
+
 		}
 
-	    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
+	} else {	
 
-		invS[0][0] = S[1][1] / detS;
-		invS[1][1] = S[0][0] / detS;
-		invS[0][1] = -S[1][0] / detS;
-		invS[1][0] = -S[0][1] / detS;
+		for (int i = threadIdx.x; i<nMB; i+= blockDim.x){
 
-		DSD = D[0]*(invS[0][0]*D[0] + invS[0][1]*D[1]) + D[1]*(invS[1][0]*D[0] + invS[1][1]*D[1]);
+		    D[0] = Dk[0] - tex2D(DMQ,i,0);
+	    	D[1] = Dk[1] - tex2D(DMQ,i,1);
 
-		lnp[threadIdx.x] = logaddexp(lnp[threadIdx.x],-0.5*DSD + log(PM[i]) - 0.5*log(detS));
+			S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
+			S[0][1] = Sk[0][1] + tex2D(SMQ,i,1);
+			S[1][0] = Sk[1][0] + tex2D(SMQ,i,2);
+			S[1][1] = Sk[1][1] + tex2D(SMQ,i,3);	
 
-		//printf("k, i, Dk, DMQ, D0, Sk, DSD, lnp: %d %d %f  %f %f %f %f %f %f %f %f %f %f %f\\n",blockIdx.x,i,Dk[0],Dk[1],tex2D(DMQ,i,0),tex2D(DMQ,i,1),D[0], D[1], Sk[0][0], Sk[0][1],Sk[1][0],Sk[1][1],DSD, lnp[threadIdx.x]);
-		//printf("i, Dk, DMQ, D0, DSD, lnp: %d %f  %f %f %f %f %f %f %f\\n",blockIdx.x,i,Dk[0],Dk[1],tex2D(DMQ,i,0),tex2D(DMQ,i,1),D[0], D[1], DSD, lnp[threadIdx.x]);
-		//printf("i, DMQ: %d, %f %f \\n",i,tex2D(DMQ,i,0),tex2D(DMQ,i,1));
-		//printf("i, SMQ: %d %f %f \\n",i, tex2D(SMQ,i,0),tex2D(SMQ,i,1),tex2D(SMQ,i,2),tex2D(SMQ,i,3));
+		    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
 
+			invS[0][0] = S[1][1] / detS;
+			invS[1][1] = S[0][0] / detS;
+			invS[0][1] = -S[1][0] / detS;
+			invS[1][0] = -S[0][1] / detS;
+
+			DSD = D[0]*(invS[0][0]*D[0] + invS[0][1]*D[1]) + D[1]*(invS[1][0]*D[0] + invS[1][1]*D[1]);
+
+			lnp[threadIdx.x] = logaddexp(lnp[threadIdx.x],-0.5*DSD + log(PM[i]) - 0.5*log(detS));
+
+		}
 
 	}
 
@@ -241,33 +257,55 @@ __device__ void binary_likelihood(int htype, double h, double *Dk, double Sk[2][
 
     lnp[threadIdx.x] = -1.e50;
 
-    for (int i = threadIdx.x; i<nMB*nQB; i+= blockDim.x){
+ 	if (htype == 1) {
 
-	    D[0] = Dk[0] - tex2D(DMQ,i,0);
-    	D[1] = Dk[1] - tex2D(DMQ,i,1);
+	   for (int i = threadIdx.x; i<nMB*nQB; i+= blockDim.x){
 
-		S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
+		    D[0] = Dk[0] - tex2D(DMQ,i,0);
+	    	D[1] = Dk[1] - tex2D(DMQ,i,1);
 
-		if (htype == 1) {
+			S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
 			S[0][1] = h*h*Sk[0][1] + tex2D(SMQ,i,1);
 			S[1][0] = h*h*Sk[1][0] + tex2D(SMQ,i,2);
 			S[1][1] = h*h*Sk[1][1] + tex2D(SMQ,i,3);
-		} else {
+
+		    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
+
+			invS[0][0] = S[1][1] / detS;
+			invS[1][1] = S[0][0] / detS;
+			invS[0][1] = -S[1][0] / detS;
+			invS[1][0] = -S[0][1] / detS;
+
+			DSD = D[0]*(invS[0][0]*D[0] + invS[0][1]*D[1]) + D[1]*(invS[1][0]*D[0] + invS[1][1]*D[1]);
+
+			lnp[threadIdx.x] = logaddexp(lnp[threadIdx.x],-0.5*DSD + log(PMQ[i]) - 0.5*log(detS));
+
+		}
+
+	} else {
+
+	   for (int i = threadIdx.x; i<nMB*nQB; i+= blockDim.x){
+
+		    D[0] = Dk[0] - tex2D(DMQ,i,0);
+	    	D[1] = Dk[1] - tex2D(DMQ,i,1);
+
+			S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
 			S[0][1] = Sk[0][1] + tex2D(SMQ,i,1);
 			S[1][0] = Sk[1][0] + tex2D(SMQ,i,2);
 			S[1][1] = Sk[1][1] + tex2D(SMQ,i,3);
+
+		    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
+
+			invS[0][0] = S[1][1] / detS;
+			invS[1][1] = S[0][0] / detS;
+			invS[0][1] = -S[1][0] / detS;
+			invS[1][0] = -S[0][1] / detS;
+
+			DSD = D[0]*(invS[0][0]*D[0] + invS[0][1]*D[1]) + D[1]*(invS[1][0]*D[0] + invS[1][1]*D[1]);
+
+			lnp[threadIdx.x] = logaddexp(lnp[threadIdx.x],-0.5*DSD + log(PMQ[i]) - 0.5*log(detS));
+
 		}
-
-	    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
-
-		invS[0][0] = S[1][1] / detS;
-		invS[1][1] = S[0][0] / detS;
-		invS[0][1] = -S[1][0] / detS;
-		invS[1][0] = -S[0][1] / detS;
-
-		DSD = D[0]*(invS[0][0]*D[0] + invS[0][1]*D[1]) + D[1]*(invS[1][0]*D[0] + invS[1][1]*D[1]);
-
-		lnp[threadIdx.x] = logaddexp(lnp[threadIdx.x],-0.5*DSD + log(PMQ[i]) - 0.5*log(detS));
 
 	}
 
