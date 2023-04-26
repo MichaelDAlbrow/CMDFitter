@@ -1,6 +1,8 @@
 import sys
 import os
 import numpy as np
+#import cunumeric as np
+
 from scipy.interpolate import PchipInterpolator
 
 import json
@@ -43,6 +45,9 @@ class Data():
 		else:
 			data_file = data_dict[data_field]
 
+		if 'error_multiplier' not in data_dict:
+			data_dict['error_multiplier'] = 1.0
+
 
 		rawdata = np.loadtxt(data_file)
 		data = rawdata[~np.isnan(rawdata).any(axis=1),:]
@@ -51,8 +56,8 @@ class Data():
 
 		self.colour = data[:,data_dict['column_blue']] - data[:,data_dict['column_red']]
 
-		self.magnitude_err = data[:,data_dict['column_mag_err']]
-		self.colour_err = np.sqrt(data[:,data_dict['column_blue_err']]**2 + data[:,data_dict['column_red_err']]**2)
+		self.magnitude_err = data_dict['error_multiplier']*data[:,data_dict['column_mag_err']]
+		self.colour_err = data_dict['error_multiplier']*np.sqrt(data[:,data_dict['column_blue_err']]**2 + data[:,data_dict['column_red_err']]**2)
 
 		self.magnitude_min = data_dict['magnitude_min']
 		self.magnitude_max = data_dict['magnitude_max']
@@ -62,7 +67,7 @@ class Data():
 
 
 		self.trim_left = 0.05
-		self.trim_right = 0.2
+		self.trim_right = 0.15
 		if 'trim_left' in data_dict:
 			self.trim_left = data_dict['trim_left']
 		if 'trim_right' in data_dict:
@@ -75,42 +80,43 @@ class Data():
 
 		# set up data covariance matrices
 
+		if 'column_mag_equiv' not in data_dict:
+			data_dict['column_mag_equiv'] = data_dict['column_mag']
+
 		self.cov = np.empty((len(self.magnitude),2,2),dtype='float32')
 
-		if data_dict['column_mag'] == data_dict['column_blue']:
+		if data_dict['column_mag'] == data_dict['column_blue'] or data_dict['column_mag_equiv'] == data_dict['column_blue']:
 
-			self.cov[:,0,0] = data[:,data_dict['column_blue_err']]**2 + data[:,data_dict['column_red_err']]**2
-			self.cov[:,0,1] = data[:,data_dict['column_blue_err']]**2
-			self.cov[:,1,0] = data[:,data_dict['column_blue_err']]**2
-			self.cov[:,1,1] = data[:,data_dict['column_blue_err']]**2
+			self.cov[:,0,0] = data_dict['error_multiplier']**2*(data[:,data_dict['column_blue_err']]**2 + data[:,data_dict['column_red_err']]**2)
+			self.cov[:,0,1] = data_dict['error_multiplier']**2*data[:,data_dict['column_blue_err']]**2
+			self.cov[:,1,0] = data_dict['error_multiplier']**2*data[:,data_dict['column_blue_err']]**2
+			self.cov[:,1,1] = data_dict['error_multiplier']**2*data[:,data_dict['column_blue_err']]**2
 			self.magnitude_type = 'blue'
 
-		elif data_dict['column_mag'] == data_dict['column_red']:
+		elif data_dict['column_mag'] == data_dict['column_red'] or data_dict['column_mag_equiv'] == data_dict['column_red']:
 
-			self.cov[:,0,0] = data[:,data_dict['column_blue_err']]**2 + data[:,data_dict['column_red_err']]**2
-			self.cov[:,0,1] = data[:,data_dict['column_red_err']]**2
-			self.cov[:,1,0] = data[:,data_dict['column_red_err']]**2
-			self.cov[:,1,1] = data[:,data_dict['column_red_err']]**2
+			self.cov[:,0,0] = data_dict['error_multiplier']**2*(data[:,data_dict['column_blue_err']]**2 + data[:,data_dict['column_red_err']]**2)
+			self.cov[:,0,1] = data_dict['error_multiplier']**2*data[:,data_dict['column_red_err']]**2
+			self.cov[:,1,0] = data_dict['error_multiplier']**2*data[:,data_dict['column_red_err']]**2
+			self.cov[:,1,1] = data_dict['error_multiplier']**2*data[:,data_dict['column_red_err']]**2
 			self.magnitude_type = 'red'
 
 		else:
 
-			self.cov[:,0,0] = data[:,data_dict['column_blue_err']]**2 + data[:,data_dict['column_red_err']]**2
+			self.cov[:,0,0] = data_dict['error_multiplier']**2*(data[:,data_dict['column_blue_err']]**2 + data[:,data_dict['column_red_err']]**2)
 			self.cov[:,0,1] = 0.0
 			self.cov[:,1,0] = 0.0
-			self.cov[:,1,1] = data[:,data_dict['column_mag_err']]**2
+			self.cov[:,1,1] = data_dict['error_multiplier']**2*data[:,data_dict['column_mag_err']]**2
 			self.magnitude_type = 'independent'
 
 		return
 
 
 
-	def upload_to_GPU(self,drv):
+	def upload_to_GPU(self,drv,likelihood_functions):
 
 		"""Upload data to GPU texture memory."""
 
-		from likelihood_gaussbf_CUDA import likelihood_functions
-		likelihood = likelihood_functions.get_function("likelihood")
 
 		c_cov = self.cov.reshape((len(self.magnitude),4),order='F')
 		self.cov_CUDA = likelihood_functions.get_texref("cov")
@@ -176,6 +182,7 @@ class Data():
 								( (self.magnitude < self.magnitude_max) & \
 									(self.magnitude > self.magnitude_max - 0.75) & \
 									(self.colour < B_max_interp(self.magnitude) + 0.01 ) ) )[0]
+
 		if plot:
 
 			plt.figure(figsize=(3.3,4.5))

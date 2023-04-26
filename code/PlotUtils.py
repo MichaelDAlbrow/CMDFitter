@@ -1,6 +1,7 @@
 import sys
 import os
 import numpy as np
+#import cunumeric as np
 
 import matplotlib
 matplotlib.use("Agg")
@@ -8,6 +9,7 @@ import matplotlib.pyplot as plt
 
 
 from CMDFitter import CMDFitter
+from plot_ellipse import plot_ellipse
 
 
 class PlotUtils():
@@ -21,7 +23,8 @@ class PlotUtils():
 
 		import random
 
-		assert isinstance(fitter,CMDFitter)
+		#print('type fitter:',type(fitter))
+		#assert isinstance(fitter,CMDFitter)
 
 		if ax is None:
 			plt.figure(figsize=(3,2))
@@ -84,7 +87,7 @@ class PlotUtils():
 
 		import random
 
-		assert isinstance(fitter,CMDFitter)
+		#assert isinstance(fitter,CMDFitter)
 
 		if ax is None:
 			plt.figure(figsize=(3,2))
@@ -111,6 +114,17 @@ class PlotUtils():
 			args = p[fitter.q_index:fitter.b_index].tolist()
 			args.append(fitter.M_ref)
 			ax.plot(q,fitter.q_distribution(q,args),'r-',alpha=1,lw=2)
+			if (fitter.q_model == 'legendre') and (np.sum(fitter.freeze[fitter.q_index+3:fitter.b_index]) < 3) or \
+					(fitter.q_model == 'single_power') and (np.sum(fitter.freeze[fitter.q_index+2:fitter.b_index]) < 2) or \
+					(fitter.q_model == 'quadratic') and (np.sum(fitter.freeze[fitter.q_index+2:fitter.b_index]) < 2) or \
+					(fitter.q_model == 'hist') and (np.sum(fitter.freeze[fitter.q_index+4:fitter.b_index]) < 4):
+				args = p[fitter.q_index:fitter.b_index].tolist()
+				args.append(fitter.mass_slice[0])
+				ax.plot(q,fitter.q_distribution(q,args),'r--',alpha=1,lw=1)
+				args = p[fitter.q_index:fitter.b_index].tolist()
+				args.append(fitter.mass_slice[1])
+				ax.plot(q,fitter.q_distribution(q,args),'r:',alpha=1,lw=1)
+
 		
 		if plot_name:
 			xlimits = ax.get_xlim()
@@ -122,7 +136,7 @@ class PlotUtils():
 
 
 
-		ax.set_ylim((0,3))
+		ax.set_ylim((0,5))
 		ax.set_xlim((fitter.q_min,1))
 
 		ax.set_xlabel(r'$q$')
@@ -141,7 +155,7 @@ class PlotUtils():
 
 		import random
 
-		assert isinstance(fitter,CMDFitter)
+		#assert isinstance(fitter,CMDFitter)
 
 		if ax is None:
 			plt.figure(figsize=(3,2))
@@ -171,7 +185,7 @@ class PlotUtils():
 			ax.set_ylim(ylimits)
 
 
-		ax.set_ylim((0,3))
+		ax.set_ylim((0,5))
 		ax.set_xlim((fitter.q_min,1))
 
 		ax.set_xlabel(r'$q$')
@@ -190,7 +204,7 @@ class PlotUtils():
 
 		from statsmodels.stats.weightstats import DescrStatsW
 
-		assert isinstance(fitter, CMDFitter)
+		#assert isinstance(fitter, CMDFitter)
 
 		if ax is None:
 			plt.figure(figsize=(3,2))
@@ -223,9 +237,11 @@ class PlotUtils():
 							np.trapz(fitter.M_distribution(m,p[:fitter.q_index]),x=m)
 
 				# Adjust for outliers
-				fb /= 1.0 - p[fitter.b_index+2]
+				fb /= 1.0 - p[fitter.b_index+3]
 
-				y[i] = fb * fitter.q_distribution_integral(p[fitter.q_index:fitter.b_index],q[j],1.0)
+				args = p[fitter.q_index:fitter.b_index].tolist()
+				args.append(fitter.M_ref)
+				y[i] = fb * fitter.q_distribution_integral(args,q[j],1.0)
 
 			wq  = DescrStatsW(data=y,weights=weights)
 			qq = wq.quantile(probs=np.array(0.01*np.array([50.0-sig2,50.0-sig1,50.0,50.0+sig1,50.0+sig2])),\
@@ -272,7 +288,7 @@ class PlotUtils():
 
 		from statsmodels.stats.weightstats import DescrStatsW
 
-		assert isinstance(fitter, CMDFitter)
+		#assert isinstance(fitter, CMDFitter)
 
 		q = (q_dash-fitter.q_min)/(1.0-fitter.q_min)
 
@@ -301,7 +317,7 @@ class PlotUtils():
 							np.trapz(fitter.M_distribution(m,p[:fitter.q_index]),x=m)
 
 				# Adjust for outliers
-				fb /= 1.0 - p[fitter.b_index+2]
+				fb /= 1.0 - p[fitter.b_index+3]
 
 				y[i] = fb * fitter.q_distribution_integral(p[fitter.q_index:fitter.b_index],q[j],1.0)
 
@@ -324,7 +340,7 @@ class PlotUtils():
 
 		from statsmodels.stats.weightstats import DescrStatsW
 
-		assert isinstance(fitter, CMDFitter)
+		#assert isinstance(fitter, CMDFitter)
 
 		assert fitter.q_model == 'legendre'
 
@@ -359,7 +375,7 @@ class PlotUtils():
 							np.trapz(fitter.M_distribution(m,p[:fitter.q_index]),x=m)
 
 				# Adjust for outliers
-				fb /= 1.0 - p[fitter.b_index+2]
+				fb /= 1.0 - p[fitter.b_index+3]
 
 				y[i] = fb * fitter.q_distribution_integral(p[fitter.q_index:fitter.b_index],q[j],1.0)
 
@@ -402,11 +418,15 @@ class PlotUtils():
 		return ax
 
 
-	def plot_realisation(fitter,params,plot_file='realisation.png',outliers=True,scatter=True,plot_name=True,s_colour='k',b_colour='k',o_colour='k'):
+	def plot_realisation(fitter,params,plot_file='realisation.png',outliers=True,scatter=True,outlier_distribution=False,plot_name=True,s_colour='k',b_colour='k',o_colour='k'):
 
 		"""Plot the data CMD and 3 comparative random realisations of the model implied by params."""
 
-		assert isinstance(fitter, CMDFitter)
+		#assert isinstance(fitter, CMDFitter)
+
+		if outlier_distribution:
+			oc, om, ocv, omv, ocov = params[fitter.i_index-8:fitter.i_index-3]
+			cov = np.array([[ocv,ocov],[ocov,omv]])
 
 		n = len(fitter.data.magnitude)
 
@@ -419,6 +439,9 @@ class PlotUtils():
 		ax[0].invert_yaxis()
 		xlimits = ax[0].get_xlim()
 		ylimits = ax[0].get_ylim()
+
+		if outlier_distribution:
+			plot_ellipse(ax[0],x_cent=oc,y_cent=om,cov=cov,plot_kwargs={'color':'orange'})
 
 		if plot_name:
 			ax[0].scatter(-100,-100,marker='.',s=0.0001,c='w',label=fitter.data.name)
