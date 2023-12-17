@@ -94,6 +94,8 @@ class Isochrone():
 		else:
 			self.colour += self.colour_correction(self.magnitude)
 
+		np.savetxt('isochrone.txt',np.vstack((self.colour,self.magnitude)).T)
+
 		ind = np.argsort(self.colour)
 		self.colour_mag_interp = PchipInterpolator(self.colour[ind],self.magnitude[ind])
 

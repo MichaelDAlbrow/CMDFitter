@@ -6,6 +6,7 @@ import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.optimize import nnls
 from scipy.stats import norm, truncnorm
+from scipy.special import gamma
 
 from matplotlib.tri import CubicTriInterpolator, Triangulation
 
@@ -33,7 +34,7 @@ class CMDFitter():
 
 	"""Main class for the CMDFitter code."""
 
-	def __init__(self,json_file=None,data=None,isochrone=None,iso_correction_type='colour',trim_data=True,q_model='legendre',m_model='power',outlier_scale=2.0,q_min=0.0,error_scale_type='both',include_triples=False,model_isochrone_correction=False):
+	def __init__(self,json_file=None,data=None,isochrone=None,iso_correction_type='colour',trim_data=True,q_model='legendre',m_model='power',outlier_scale=2.0,q_min=0.0,error_scale_type='both',include_triples=False,model_isochrone_correction=False,parameters_dict={'n_q_hist_bins':5}):
 
 
 		"""
@@ -86,8 +87,6 @@ class CMDFitter():
 
 		self.prefix = 'out_'
 
-		self.set_up_lengdre_functions()
-
 		assert q_min >= 0.0 and q_min < 1.0
 		self.q_min = q_min
 
@@ -117,7 +116,7 @@ class CMDFitter():
 
 		self.define_data_outlier_model(outlier_scale)
 
-		self.set_up_model_parameters()
+		self.set_up_model_parameters(parameters_dict)
 
 		self.freeze = np.zeros(self.ndim)
 
@@ -238,15 +237,34 @@ class CMDFitter():
 			# 		S_ij[i+j*self.n_bf] = np.dot(jacob,(np.dot(width_matrix,(jacob.T))))
 			# sys.exit()
 
-		S_ij_shaped = S_ij.reshape(self.n_bf**self.bf_dim,4)
+		S_ij_shaped = S_ij.reshape(self.n_bf**self.bf_dim,4).astype(np.float64)
+		D_ij = D_ij.astype(np.float64)
 
-		self.DMQ_CUDA = self.likelihood_functions.get_texref("DMQ")
-		self.drv.matrix_to_texref(np.float32(D_ij),self.DMQ_CUDA,order='F')
-		self.DMQ_CUDA.set_filter_mode(self.drv.filter_mode.POINT)
+		print()
+		print('transformed basis functions')
+		for i in range(self.n_bf):
+			for j in range(self.n_bf):
+				if (np.abs(self.M0[i]-0.99) < 0.02) and (np.abs(self.q0[j]-0.49) < 0.02):
+					print(self.M0[i],self.q0[j],colour[i,j],mag[i,j],S_ij[i+j*self.n_bf])
+		print()
 
-		self.SMQ_CUDA = self.likelihood_functions.get_texref("SMQ")
-		self.drv.matrix_to_texref(np.float32(S_ij_shaped),self.SMQ_CUDA,order='F')
-		self.SMQ_CUDA.set_filter_mode(self.drv.filter_mode.POINT)
+
+		self.DMQ_gpu = drv.mem_alloc(D_ij.nbytes)
+		drv.memcpy_htod(self.DMQ_gpu, D_ij)
+
+		self.SMQ_gpu = drv.mem_alloc(S_ij_shaped.nbytes)
+		drv.memcpy_htod(self.SMQ_gpu, S_ij_shaped)
+
+		#print("DMQ",D_ij[0,0],D_ij[0,1])
+		#print("DMQ",S_ij_shaped[0,0],S_ij_shaped[0,1],S_ij_shaped[0,2],S_ij_shaped[0,3])
+
+		# self.DMQ_CUDA = self.likelihood_functions.get_texref("DMQ")
+		# self.drv.matrix_to_texref(np.float32(D_ij),self.DMQ_CUDA,order='F')
+		# self.DMQ_CUDA.set_filter_mode(self.drv.filter_mode.POINT)
+
+		# self.SMQ_CUDA = self.likelihood_functions.get_texref("SMQ")
+		# self.drv.matrix_to_texref(np.float32(S_ij_shaped),self.SMQ_CUDA,order='F')
+		# self.SMQ_CUDA.set_filter_mode(self.drv.filter_mode.POINT)
 
 
 	def jacobian_triple(self,M,q1,q2):
@@ -373,7 +391,7 @@ class CMDFitter():
 		self.MAA = np.dot(self.MAT,self.MA)
 
 
-	def set_up_model_parameters(self):
+	def set_up_model_parameters(self,parameters_dict):
 
 		"""
 			Parameters are arranged as:
@@ -411,16 +429,33 @@ class CMDFitter():
 			self.default_params = np.hstack((self.default_params, np.array([2.0, 2.0, 0.5, 1.0, 1.0])))
 
 		if self.q_model == 'legendre':
-			self.labels += [r"$a_1$", r"$a_2$", r"$a_3$", r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$"]
-			self.default_params = np.hstack((self.default_params, np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])))
+			try:
+				self.n_legendre = parameters_dict['n_legendre']
+			except KeyError:
+				self.n_legendre = 3
+			self.set_up_legendre_functions()
+			dot = r'\dot'
+			#self.labels += [r"$\log_{10} \delta$"]
+			self.labels += [r"$\delta$"]
+			self.labels += [f"$a_{i}$" for i in range(1,self.n_legendre+1)]
+			self.labels += [f"${dot}{{a_{i}}}$" for i in range(1,self.n_legendre+1)]
+			self.default_params = np.hstack((self.default_params, 0.25, np.zeros(self.n_legendre),np.zeros(self.n_legendre)))
+			#self.labels += [r"$a_1$", r"$a_2$", r"$a_3$", r"$\dot{a}_1$", r"$\dot{a}_2$", r"$\dot{a}_3$"]
+			#self.default_params = np.hstack((self.default_params, np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])))
 
 		if self.q_model == 'piecewise':
 			self.labels += [r"$pq_4$",  r"$pq_3$",  r"$pq_2$", r"$pq_1$"]
 			self.default_params = np.hstack((self.default_params, np.array([1.0, 1.0, 1.0, 1.0])))
 
 		if self.q_model == 'hist':
-			self.labels += [r"$pq_4$",  r"$pq_3$",  r"$pq_2$", r"$pq_1$", r"$\dot{pq_4}$",  r"$\dot{pq_3}$",  r"$\dot{pq_2}$", r"$\dot{pq_1}$"]
-			self.default_params = np.hstack((self.default_params, np.array([1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0])))
+			try:
+				self.n_q_hist_bins = parameters_dict['n_q_hist_bins']
+			except KeyError:
+				self.n_q_hist_bins = 5
+			dot = r'\dot'
+			self.labels += [f"$pq_{{{i}}}$" for i in range(self.n_q_hist_bins)]
+			self.labels += [f"${dot}{{pq_{{{i}}}}}$" for i in range(self.n_q_hist_bins)]
+			self.default_params = np.hstack((self.default_params, np.ones(self.n_q_hist_bins),np.zeros(self.n_q_hist_bins)))
 
 		self.b_index = len(self.default_params)
 
@@ -434,8 +469,8 @@ class CMDFitter():
 
 		# Outliers and error scaling
 
-		self.labels += [r"$o_c$",r"$o_m$",r"$o_{cv}$",r"$o_{mv}$",r"$o_{cov}$",r"$f_O$", r"$h_0$", r"$h_1$"]
-		self.default_params = np.hstack((self.default_params,self.outlier_description,np.array([0.0,1.0,0.0])))
+		self.labels += [r"$o_c$",r"$o_m$",r"$o_{cv}$",r"$o_{mv}$",r"$o_{cov}$",r"$f_O$", r"$log h$", r"$\dot{h}$"]
+		self.default_params = np.hstack((self.default_params,self.outlier_description,np.array([0.0,0.0,0.0])))
 		self.i_index = len(self.default_params)
 
 		# Isochrone correction
@@ -454,28 +489,48 @@ class CMDFitter():
 		self.ndim = len(self.default_params)
 
 
-	def set_up_lengdre_functions(self):
+	def set_up_legendre_functions(self):
+
+		assert self.n_legendre < 6
 
 		# Shifted Legendre polynomials
-		self.sl_0 = lambda x: x*0.0 + 1.0
-		self.sl_1 = lambda x: 2.0*x - 1.0
-		self.sl_2 = lambda x: 6.0*x**2 - 6.0*x + 1.0
-		self.sl_3 = lambda x: 20.0*x**3 - 30.0*x**2 + 12.0*x - 1.0
-		self.sl_4 = lambda x: 70.0*x**4 - 140.0*x**3 + 90.0*x**2 - 20.0*x + 1.0
+		#self.sl_0 = lambda x: x*0.0 + 1.0
+		#self.sl_1 = lambda x: 2.0*x - 1.0
+		#self.sl_2 = lambda x: 6.0*x**2 - 6.0*x + 1.0
+		#self.sl_3 = lambda x: 20.0*x**3 - 30.0*x**2 + 12.0*x - 1.0
+		#self.sl_4 = lambda x: 70.0*x**4 - 140.0*x**3 + 90.0*x**2 - 20.0*x + 1.0
+		self.sl = [lambda x: x*0.0 + 1.0,
+				lambda x: 2.0*x - 1.0,
+				lambda x: 6.0*x**2 - 6.0*x + 1.0,
+				lambda x: 20.0*x**3 - 30.0*x**2 + 12.0*x - 1.0,
+				lambda x: 70.0*x**4 - 140.0*x**3 + 90.0*x**2 - 20.0*x + 1.0,
+				lambda x: 252.0*x**5 - 630.0*x**4 + 560.0*x**3 - 210.0*x**2 + 30.0*x - 1.0]
 
 		# Derivatives of shifted Legendre polynomials
-		self.der_sl_0 = lambda x: 0.0
-		self.der_sl_1 = lambda x: 2.0
-		self.der_sl_2 = lambda x: 12.0*x - 6.0
-		self.der_sl_3 = lambda x: 60.0*x**2 - 60.0*x + 12.0
-		self.der_sl_4 = lambda x: 280.0*x**3 - 420.0*x**2 + 180.0*x - 20.0
+		#self.der_sl_0 = lambda x: 0.0
+		#self.der_sl_1 = lambda x: 2.0
+		#self.der_sl_2 = lambda x: 12.0*x - 6.0
+		#self.der_sl_3 = lambda x: 60.0*x**2 - 60.0*x + 12.0
+		#self.der_sl_4 = lambda x: 280.0*x**3 - 420.0*x**2 + 180.0*x - 20.0
+		self.der_sl = [lambda x: 0.0,
+				lambda x: 2.0,
+				lambda x: 12.0*x - 6.0,
+				lambda x: 60.0*x**2 - 60.0*x + 12.0,
+				lambda x: 280.0*x**3 - 420.0*x**2 + 180.0*x - 20.0,
+				lambda x: 1260.0*x**4 - 2520.0*x**3 + 1680.0*x**2 - 4200*x + 30.0]
 
 		# Integrals of shifted Legendre polynomials
-		self.int_sl_0 = lambda x: x
-		self.int_sl_1 = lambda x: x**2 - x
-		self.int_sl_2 = lambda x: 2.0*x**3 - 3.0*x**2 + x
-		self.int_sl_3 = lambda x: 5.0*x**4 - 10.0*x**3 + 6.0*x**2 - x
-		self.int_sl_4 = lambda x: 14.0*x**5 - 35.0*x**4 + 30.0*x**3 - 10.0*x**2 + x
+		#self.int_sl_0 = lambda x: x
+		#self.int_sl_1 = lambda x: x**2 - x
+		#self.int_sl_2 = lambda x: 2.0*x**3 - 3.0*x**2 + x
+		#self.int_sl_3 = lambda x: 5.0*x**4 - 10.0*x**3 + 6.0*x**2 - x
+		#self.int_sl_4 = lambda x: 14.0*x**5 - 35.0*x**4 + 30.0*x**3 - 10.0*x**2 + x
+		self.int_sl = [lambda x: x,
+				lambda x: x**2 - x,
+				lambda x: 2.0*x**3 - 3.0*x**2 + x,
+				lambda x: 5.0*x**4 - 10.0*x**3 + 6.0*x**2 - x,
+				lambda x: 14.0*x**5 - 35.0*x**4 + 30.0*x**3 - 10.0*x**2 + x,
+				lambda x: 42.0*x**6 - 126.0*x**5 + 140.0*x**4 - 70.0*x**3 + 15.0*x**2 -x]
 
 
 	def M_distribution(self,x,params):
@@ -488,7 +543,8 @@ class CMDFitter():
 			log_k,x0,gamma,c0, c1 = params
 			k = 10.0**log_k
 			m = np.linspace(self.mass_slice[0],self.mass_slice[1],1000)
-			c_scale = np.max([self.mass_slice[0],x0])**(-gamma)
+			#c_scale = np.max([self.mass_slice[0],x0])**(-gamma)
+			c_scale = self.mass_slice[0]**(-gamma)
 			#y = ((c0 + c1*(m-self.mass_slice[0]))*c_scale + m**(-gamma) )/ (1.0 + np.exp(-k*(m-x0)) )
 			y = ((c0 + c1*(m-self.mass_slice[0]))*c_scale + m**(-gamma) ) * np.tanh(-k*(m-x0)) 
 			normalM = 1.0 / (np.sum(y)*(m[1]-m[0]))
@@ -571,7 +627,10 @@ class CMDFitter():
 
 	def q_distribution_legendre(self,x,params):
 
-		a1, a2, a3, a1_dot, a2_dot,a3_dot, M = params
+		a = np.array(params[1:self.n_legendre+1])
+		adot = np.array(params[self.n_legendre+1:2*self.n_legendre+1])
+		M = params[-1]
+		#a1, a2, a3, a1_dot, a2_dot,a3_dot, M = params
 		dM = M-self.M_ref
 
 		x_arr = np.atleast_1d(x)
@@ -579,7 +638,11 @@ class CMDFitter():
 		# Map q to 0 - 1 domain for legendre functions
 		x1 = (x_arr-self.q_min)/(1.0-self.q_min) 
 
-		return self.sl_0(x1) + (a1+a1_dot*dM)*self.sl_1(x1) + (a2+a2_dot*dM)*self.sl_2(x1) + (a3+a3_dot*dM)*self.sl_3(x1)
+		#return self.sl_0(x1) + (a1+a1_dot*dM)*self.sl_1(x1) + (a2+a2_dot*dM)*self.sl_2(x1) + (a3+a3_dot*dM)*self.sl_3(x1)
+		f = self.sl[0](x1) 
+		for i in range(self.n_legendre):
+			f += (a[i]+adot[i]*dM)*self.sl[i+1](x1)
+		return f
 
 
 	def q_distribution_piecewise(self,x,params):
@@ -605,21 +668,19 @@ class CMDFitter():
 
 	def q_distribution_hist(self,x,params):
 
-		pnode = np.zeros(5)
-		pnode_dot = np.zeros(5)
-		pnode[4], pnode[3], pnode[2], pnode[1], pnode_dot[4], pnode_dot[3], pnode_dot[2], pnode_dot[1], M = params
+		pnode = params[:self.n_q_hist_bins]
+		pnode_dot = params[self.n_q_hist_bins:2*self.n_q_hist_bins]
+		M = params[-1]
 
 		dM = M-self.M_ref
 
-		delta_q = (1.0-self.q_min)/5.0
-		qnode = self.q_min + np.arange(5)*delta_q
-
-		pnode[0] = 5.0 - np.sum(pnode[1:]+pnode_dot[1:]*dM)
+		delta_q = (1.0-self.q_min)/self.n_q_hist_bins
+		qnode = self.q_min + np.arange(self.n_q_hist_bins)*delta_q
 
 		x_arr = np.atleast_1d(x)
 		qdist = np.zeros_like(x_arr)
 
-		for i in range(5):
+		for i in range(self.n_q_hist_bins):
 			ind = np.where(x_arr >= qnode[i])[0]
 			if ind.any():
 				qdist[ind] = pnode[i] + pnode_dot[i]*dM
@@ -686,10 +747,9 @@ class CMDFitter():
 		q1 = (q1-self.q_min)/(1.0-self.q_min) 
 		q2 = (q2-self.q_min)/(1.0-self.q_min) 
 
-		y = self.int_sl_0(q2) - self.int_sl_0(q1)
-		y += params[0]*(self.int_sl_1(q2) - self.int_sl_1(q1))
-		y += params[1]*(self.int_sl_2(q2) - self.int_sl_2(q1))
-		y += params[2]*(self.int_sl_3(q2) - self.int_sl_3(q1))
+		y = self.int_sl[0](q2) - self.int_sl[0](q1)
+		for i in range(self.n_legendre):
+			y += params[i]*(self.int_sl[i+1](q2) - self.int_sl[i+1](q1))
 
 		return y
 
@@ -794,13 +854,13 @@ class CMDFitter():
 
 	def integrate_hist(self,params,q1,q2):
 
-		pnode = np.zeros(5)
-		pnode[4], pnode[3], pnode[2], pnode[1] = params
+		pnode = np.zeros(self.n_q_hist_bins)
+		pnode[self.n_q_hist_bins-1:0:-1] = params
 
-		delta_q = self.q_min/5.0
-		qnode = self.q_min + np.arange(5)*delta_q
+		delta_q = self.q_min/self.n_q_hist_bins
+		qnode = self.q_min + np.arange(self.n_q_hist_bins)*delta_q
 
-		pnode[0] = 5.0 - np.sum(pnode[1:])
+		pnode[0] = self.n_q_hist_bins - np.sum(pnode[1:])
 
 		q_int = np.zeros(2)
 
@@ -915,7 +975,7 @@ class CMDFitter():
 		Also return 		star_type = 0, 1, 2 for single stars, binaries, outliers.
 		""" 
 
-		fb0, fb1, ft0, oc, om, ocv, omv, ocov, fo, h0, h1 = p[self.b_index:self.i_index]
+		fb0, fb1, ft0, oc, om, ocv, omv, ocov, fo, logh, hdot = p[self.b_index:self.i_index]
 
 		# If we are modelling the isochrone offsets, then we need to recompute the isochrone and basis functions.
 		if self.model_isochrone_correction:
@@ -984,7 +1044,7 @@ class CMDFitter():
 
 		if add_observational_scatter:
 
-			h = h0 + h1*(mag-self.h_magnitude_ref)
+			h = 10.0**logh + hdot*(mag-self.h_magnitude_ref)
 
 			cov = self.compute_observational_scatter(mag)
 
@@ -1002,6 +1062,7 @@ class CMDFitter():
 		print('Model realisation')
 		print('Mass range:',np.min(M1),np.max(M1))
 		print('Magnitude range',np.min(mag),np.max(mag))
+		print(n,'total stars including',n_outliers,'outliers')
 
 		return mag, colour, star_type
 
@@ -1062,7 +1123,7 @@ class CMDFitter():
 		the grids of (M,q) basis function coefficients for binary stars and for triple stars. These are multiplied
 		by the single-star, binary-star and triple-star fractions respectively."""
 
-		fb0, fb1, ft0, oc, om, ocv, omf, ocov, fo, h0, h1 = params[self.b_index:self.i_index]
+		fb0, fb1, ft0, oc, om, ocv, omf, ocov, fo, logh, hdot = params[self.b_index:self.i_index]
 
 		# fb and ft_fb are vectors here
 		fb = fb0 + fb1*(self.mass_slice[1] - self.M0)
@@ -1075,7 +1136,7 @@ class CMDFitter():
 
 			PMQ_t = np.zeros(self.n_bf**3)
 
-			if (self.q_model == 'legendre') and (np.sum(self.freeze[self.q_index+3:self.b_index]) < 3) or \
+			if (self.q_model == 'legendre') and (np.sum(self.freeze[self.q_index+self.n_legendre:self.b_index]) < self.n_legendre) or \
 						(self.q_model == 'single_power') and (np.sum(self.freeze[self.q_index+2:self.b_index]) < 2) or \
 						(self.q_model == 'quadratic') and (np.sum(self.freeze[self.q_index+2:self.b_index]) < 2):
 
@@ -1103,7 +1164,7 @@ class CMDFitter():
 
 			PMQ_t = None
 
-			if (self.q_model == 'legendre') and (np.sum(self.freeze[self.q_index+3:self.b_index]) < 3) or \
+			if (self.q_model == 'legendre') and (np.sum(self.freeze[self.q_index+self.n_legendre:self.b_index]) < self.n_legendre) or \
 						(self.q_model == 'single_power') and (np.sum(self.freeze[self.q_index+2:self.b_index]) < 2) or \
 						(self.q_model == 'quadratic') and (np.sum(self.freeze[self.q_index+2:self.b_index]) < 2):
 
@@ -1134,13 +1195,16 @@ class CMDFitter():
 		p = self.default_params.copy()
 		p[self.freeze==0] = params
 
-		oc, om, ocv, omf, ocov, fo, h0, h1 = p[self.i_index-8:self.i_index]
+		oc, om, ocv, omf, ocov, fo, logh, hdot = p[self.i_index-8:self.i_index]
 
 		if np.sum(self.freeze[self.i_index-8:self.i_index-3]) < 5:
 			outlier_description = np.ascontiguousarray([oc, om, ocv, omf, ocov],dtype=np.float64)
 		else:
 			outlier_description = self.outlier_description
 
+		blob = np.zeros(3)
+		blob[1] = self.ln_prior(params)
+		blob[2] = params[3]
 
 		# If we are modelling the isochrone offsets, then we need to recompute the isochrone and basis functions.
 		if self.model_isochrone_correction:
@@ -1152,7 +1216,8 @@ class CMDFitter():
 		# Check that the parameters generate positive q distributions for all masses, and a positive M distribution.
 		m_dist_test = self.M_distribution(np.linspace(self.mass_slice[0],self.mass_slice[1],101),p[:self.q_index])
 		if np.min(m_dist_test) < 0.0:
-			return self.neginf
+			blob[0] = self.neginf
+			return self.neginf, blob
 
 		if self.q_model == 'legendre':
 
@@ -1164,7 +1229,8 @@ class CMDFitter():
 					with open(self.prefix+'.err', 'a') as f:
 						#f.write('Negative q dist for:')
 						f.write(np.array2string(params,max_line_width=1000).strip('[]\n')+'\n')
-					return self.neginf
+					blob[0] = self.neginf
+					return self.neginf, blob
 
 		try:
 			P_i, PMQ, PMQ_t = self.precalc(p)
@@ -1185,6 +1251,7 @@ class CMDFitter():
 		
 		blockshape = (int(256),1, 1)
 		gridshape = (n_pts, 1)
+		#gridshape = (1, 1)
 
 		lnP_k = np.zeros(n_pts*5).astype(np.float64)
 
@@ -1196,25 +1263,33 @@ class CMDFitter():
 		if self.include_triples:
 			mtype = 1
 
-		likelihood(self.drv.In(c_P_i), self.drv.In(c_PMQ), self.drv.In(c_PMQ_t), self.drv.In(outlier_description),np.int32(htype),np.int32(mtype),np.float64(h0), np.float64(h1), np.float64(self.h_magnitude_ref),np.float64(fo), self.drv.InOut(lnP_k), block=blockshape, grid=gridshape)
+		likelihood(self.DMQ_gpu,self.SMQ_gpu,self.data.col_mag_gpu,self.data.c_cov_gpu,self.drv.In(c_P_i), self.drv.In(c_PMQ), self.drv.In(c_PMQ_t), self.drv.In(outlier_description),np.int32(htype),np.int32(mtype),np.float64(logh), np.float64(hdot), np.float64(self.h_magnitude_ref),np.float64(fo), self.drv.InOut(lnP_k), block=blockshape, grid=gridshape)
 
 		lnP = np.sum(lnP_k[:n_pts])
 
+		#sys.exit()
+
 		#print('ln P =',lnP)
 		#print()
+
+		#sys.exit()
+
 
 		self.lnP_k = lnP_k.reshape(n_pts,5,order='F')
 
 		if not(np.isfinite(lnP)):
 			with open(self.prefix+'.err', 'a') as f:
 				f.write(np.array2string(params,max_line_width=1000).strip('[]\n')+'\n')
-			return self.neginf
+			blob[0] = self.neginf
+			return self.neginf, blob
 
-		return lnP
+		blob[0] = lnP
+		return lnP, blob
 
 
 	def neglnlikelihood(self,params):
-		return -self.lnlikelihood(params)
+		lnl, _ =  self.lnlikelihood(params)
+		return -lnl
 
 
 	def ln_prior(self,params):
@@ -1273,27 +1348,27 @@ class CMDFitter():
 		if not self.freeze[0]:
 			# log k
 			#x[0] = norm.ppf(u[i], loc=1.7, scale=0.2)
-			x[0] = 1.6*u[i]+0.5
+			x[0] = 0.5*u[i]+1.5
 			i += 1
 		if not self.freeze[1]:
 			# M0
 			#x[1] = norm.ppf(u[i], loc=self.mass_slice[0]+0.1,scale=0.5)
-			x[1] = u[i] - 0.5 + self.mass_slice[0] + 0.1
+			x[1] = 0.2*u[i] - 0.1 + self.mass_slice[0]
 			i += 1
 		if not self.freeze[2]:
 			# gamma
 			#x[2] = truncnorm.ppf(u[i], -2.35, 6.0-2.35, loc=2.35, scale=1.0)
-			x[2] = 6.0*u[i] - 3.0 + 2.35
+			x[2] = 6.0*u[i]
 			i += 1
 		if not self.freeze[3]:
 			# c0
 			#x[3] = truncnorm.ppf(u[i],0.0,1.0/0.5,loc=0.0,scale=0.5)
-			x[3] = 1.0*u[i] - 0.5
+			x[3] = 13.0*u[i] - 1.0
 			i += 1
 		if not self.freeze[4]:
 			# c1
 			#x[4] = truncnorm.ppf(u[i],-1.0/0.2,1.0/0.2,loc=0.0,scale=0.2)
-			x[4] = 0.4*u[i] - 0.2
+			x[4] = 12.0*u[i]-6.0
 			i += 1
 
 		return i, x
@@ -1303,7 +1378,13 @@ class CMDFitter():
 
 		log_k, M0, gamma, c0, c1 = p
 
-		if log_k < 0.5 or log_k > 2.1 or M0 < self.mass_slice[0] - 0.4 or M0 > self.mass_slice[0] + 0.6 or gamma < -0.65 or gamma > 5.35 or c0 < -0.5 or c0 > 0.5 or c1 < -0.2 or c1 > 0.2:  
+		if not self.freeze[0]:
+			if log_k < 1.5 or log_k > 2.0:
+				return self.neginf
+		if not self.freeze[1]:
+			if M0 < self.mass_slice[0] - 0.1 or M0 > self.mass_slice[0] + 0.1:
+				return self.neginf
+		if gamma < 0.0 or gamma > 6.0 or c0 < -1.0 or c0 > 12.0 or c1 < -6.0 or c1 > 6.0:  
 			return self.neginf
 
 		return 0.0
@@ -1378,7 +1459,7 @@ class CMDFitter():
 			i += 1
 		if not self.freeze[self.q_index+1]:
 			# q1
-			x[self.q_index+1] = 0.98*u[i] + 0.01
+			x[self.q_index+1] = 0.50*u[i]
 			i += 1
 		if not self.freeze[self.q_index+2]:
 			# beta_dot
@@ -1402,7 +1483,7 @@ class CMDFitter():
 
 		if beta < -np.pi/2 or beta > np.pi/2:
 			return self.neginf
-		if q1 < 0.01 or q1 > 0.99:
+		if q1 > 0.5:
 			return self.neginf
 		beta_dot_min = np.max([-(np.pi/2-beta)/self.delta_M,(-np.pi/2 - beta)/self.delta_M])
 		beta_dot_max = np.min([-(-np.pi/2-beta)/self.delta_M,(np.pi/2 - beta)/self.delta_M])
@@ -1511,68 +1592,78 @@ class CMDFitter():
 
 	def prior_transform_q_legendre(self,u,i):
 
-		# params are a1, a2, a3, a1_dot, a2_dot, a3_dot, 
+		from scipy.stats import expon, gamma
+
+		# params are a1, a2, a3, ..., a1_dot, a2_dot, a3_dot, ...
 
 		x = self.default_params.copy()
 
+		# hyperparameter for regularisation
+		#alpha = 2.0
+		scale = 3.0
 		if not self.freeze[self.q_index]:
-
-			# a1
-			x[self.q_index] = 2.0*u[i] - 1.0
+			#x[self.q_index] = 4.0*u[i] + 1.0
+			#x[self.q_index] = 3.0*u[i]
+			#x[self.q_index]  = expon.ppf(u[i],scale=scale)
+			x[self.q_index]  = gamma.ppf(u[i],2.0,scale=scale)
 			i += 1
 
-		if not self.freeze[self.q_index+1]:
-			# a2
-			#x[self.q_index+1] = 2.0*u[i]
-			x[self.q_index+1] = 3.0*u[i] - 1.0
-			i += 1
+		#alpha = 10.0**x[self.q_index]
+		alpha = x[self.q_index]
 
-		if not self.freeze[self.q_index+2]:
-			# a3
-			t1 = (5.0-np.sqrt(5.0))/10.0
-			t2 = (5.0+np.sqrt(5.0))/10.0
-			tmin = 0.5*(-0.8 - x[self.q_index]*self.sl_1(t1) - x[self.q_index+1]*self.sl_2(t1)) / self.sl_3(t1)
-			tmax = 0.5*(-0.8 - x[self.q_index]*self.sl_1(t2) - x[self.q_index+1]*self.sl_2(t2)) / self.sl_3(t2)
-			a3min = np.max([-1.0-x[self.q_index]-x[self.q_index+1],tmin,-1.0])
-			a3max = np.min([1.0 - x[self.q_index] + x[self.q_index+1],tmax,-1.0])
-			x[self.q_index+2] = a3min + (a3max - a3min)*u[i]
-			i += 1
 
-		if not self.freeze[self.q_index+3]:
-			# a1_dot
-			#x[self.q_index+3] = norm.ppf(u[i], loc=0.0, scale=0.1/self.delta_M)
-			x[self.q_index+3] = (10.0*u[i]-5.0) * 0.1/self.delta_M
-			i += 1
-		if not self.freeze[self.q_index+4]:
-			# a2_dot
-			#x[self.q_index+4] = norm.ppf(u[i], loc=0.0, scale=0.1/self.delta_M)
-			x[self.q_index+4] = (10.0*u[i]-5.0) * 0.1/self.delta_M
-			i += 1
-		if not self.freeze[self.q_index+5]:
-			# a3_dot
-			#x[self.q_index+5] = norm.ppf(u[i], loc=0.0, scale=0.1/self.delta_M)
-			x[self.q_index+5] = (10.0*u[i]-5.0) * 0.1/self.delta_M
-			i += 1
+
+		for j in range(1, self.n_legendre+1):
+
+			if not self.freeze[self.q_index+j]:
+
+				#x[self.q_index+i] = 6.0*u[i] - 3.0
+				#x[self.q_index+j] = norm.ppf(u[i], loc=0.0, scale=alpha**(-j+1))
+				x[self.q_index+j] = norm.ppf(u[i], loc=0.0, scale=alpha)
+				i += 1
+
+		for j in range(1,self.n_legendre+1):
+
+			if not self.freeze[self.q_index+self.n_legendre+j]:
+
+				x[self.q_index+self.n_legendre+j] = (10.0*u[self.n_legendre+i]-5.0) * 0.1/self.delta_M
+				i += 1
+
 
 		return i, x[self.q_index:self.b_index]
 
 
 	def ln_prior_q_legendre(self,p):
 
-		a1, a2, a3,  a1_dot, a2_dot, a3_dot = p
+		from scipy.stats import expon, gamma
 
-		t1 = (5.0-np.sqrt(5.0))/10.0
-		t2 = (5.0+np.sqrt(5.0))/10.0
-		tmin = 0.5*(-0.8 - a1*self.sl_1(t1) - a2*self.sl_2(t1)) / self.sl_3(t1)
-		tmax = 0.5*(-0.8 - a1*self.sl_1(t2) - a2*self.sl_2(t2)) / self.sl_3(t2)
-		a3min = np.max([-1.0-a1-a2,tmin,-1.0])
-		a3max = np.min([1.0 - a1 + a2,tmax,1.0])
+		scale = 3.0
 
-		if a1 < -1.0 or a1 > 1.0 or a2 < -1.0 or a2 > 3.0 or a3 < a3min or a3 > a3max or a1_dot < -5.0*0.1/self.delta_M or a1_dot > 5.0*0.1/self.delta_M or \
-				a2_dot < -5.0*0.1/self.delta_M or a2_dot > 5.0*0.1/self.delta_M or a2_dot < -5.0*0.1/self.delta_M or a2_dot > 5.0*0.1/self.delta_M:
-			return self.neginf 
+		# hyperparameter for regularisation
+		#alpha = 2.0
+		#alpha = 10.0**p[0]
+		alpha = p[0]
 
-		return 0.0
+		a = p[1:self.n_legendre+1]
+		adot = p[self.n_legendre+1:2*self.n_legendre+1]
+
+		#if p[0] <= 0.0 or p[0] > 1.0:
+		# if p[0] < 1.0 or p[0] > 5.0:
+		# 	return self.neginf 
+
+		for i in range(self.n_legendre):
+			if adot[i] < -5.0*0.1/self.delta_M or adot[i] > 5.0*0.1/self.delta_M:
+				return self.neginf
+
+		lnp = 0.0
+		lnp += expon.pdf(alpha,scale=scale)
+		lnp += gamma.pdf(alpha,2.0,scale=scale)
+		for i in range(self.n_legendre):
+			#pp = norm.pdf(a[i], loc=0.0, scale=alpha**(-i))
+			pp = norm.pdf(a[i], loc=0.0, scale=alpha)
+			lnp += np.log(pp)
+
+		return lnp
 
 
 	def prior_transform_q_piecewise(self,u,i):
@@ -1634,7 +1725,7 @@ class CMDFitter():
 		return 0.0
 
 
-	def prior_transform_q_hist(self,u,i):
+	def prior_transform_q_hist_old(self,u,i):
 
 		# params are pq4, pq3, pq2, pq1, pq4_dot, pq3_dot, pq2_dot, pq1_dot
 
@@ -1645,24 +1736,25 @@ class CMDFitter():
 			#sc = 0.5
 			#x[self.q_index] = truncnorm.ppf(u[i], -1.0/sc, 3.99/sc, loc=1.0, scale=sc)
 			delta_q = 1.0/5.0
-			pmax = 1.0/delta_q
-			x[self.q_index] = u[i]*5.0
+			#pmax = 1.0/delta_q
+			pmax = 2.0
+			x[self.q_index] = u[i]*pmax
 			i += 1
 		if not self.freeze[self.q_index+1]:
 			# pq3
-			pmax = 1.0/delta_q - x[self.q_index] 
+			pmax = np.min([2.0,1.0/delta_q - x[self.q_index]]) 
 			#x[self.q_index+1] = truncnorm.ppf(u[i], -1.0/sc, (pmax-1.0)/sc, loc=1.0, scale=sc)
 			x[self.q_index+1] = pmax*u[i]
 			i += 1
 		if not self.freeze[self.q_index+2]:
 			# pq2
-			pmax = 1.0/delta_q - x[self.q_index] - x[self.q_index+1]
+			pmax = np.min([2.0,1.0/delta_q - x[self.q_index] - x[self.q_index+1]])
 			#x[self.q_index+2] = truncnorm.ppf(u[i], -1.0/sc, (pmax-1.0)/sc, loc=1.0, scale=sc)
 			x[self.q_index+2] = pmax*u[i]
 			i += 1
 		if not self.freeze[self.q_index+3]:
 			# pq1
-			pmax = 1.0/delta_q - x[self.q_index] - x[self.q_index+1] - x[self.q_index+2]
+			pmax = np.min([2.0,1.0/delta_q - x[self.q_index] - x[self.q_index+1] - x[self.q_index+2]])
 			#x[self.q_index+3] = truncnorm.ppf(u[i], -1.0/sc, (pmax-1.0)/sc, loc=1.0, scale=sc)
 			x[self.q_index+3] = pmax*u[i]
 			i += 1
@@ -1699,41 +1791,113 @@ class CMDFitter():
 		return i, x[self.q_index:self.b_index]
 
 
+	def prior_transform_q_hist(self,u,i):
+
+		# params are pq4, pq3, pq2, pq1, pq4_dot, pq3_dot, pq2_dot, pq1_dot
+
+		# Map 0 - 1 to inverse of cumulative beta distribution
+
+		x = self.default_params.copy()
+		N =self.n_q_hist_bins
+		delta_q = 1.0/N
+
+		for j in range(N):
+			if not self.freeze[self.q_index+j]:
+				# pq j
+				#x[self.q_index+j] = 1.0 - (1.0 - u[i])**(1.0/(N-1))
+				x[self.q_index+j] = 1.0 - (1.0 - u[i])**(1.0/(N-1))
+				i += 1
+
+		# This normalization ensures that the parameters are Dirichlet-distributed
+		# rand_beta = 1.0 - (1.0 - np.random.rand())**(1.0/(N-1))
+		# x[self.q_index:self.q_index+N-1] /= np.sum(x[self.q_index:self.q_index+N-1]) + rand_beta
+		# x[self.q_index:self.q_index+N-1] *= N
+
+		x[self.q_index:self.q_index+N] /= np.sum(x[self.q_index:self.q_index+N]) 
+		x[self.q_index:self.q_index+N] *= N
+
+		for j in range(N,2*N):
+			if not self.freeze[self.q_index+j]:
+				# pq j _dot
+				pmax = 1.0/delta_q - np.sum(x[self.q_index:self.q_index+j-N+1])
+				p_dot_min = np.max([-(pmax-x[self.q_index+j-N+1])/self.delta_M,(0.00 - x[self.q_index+j-N+1])/self.delta_M])
+				p_dot_max = np.min([-(0.00-x[self.q_index+j-N+1])/self.delta_M,(pmax - x[self.q_index+j-N+1])/self.delta_M])
+				x[self.q_index+j] = (p_dot_max-p_dot_min)*u[i] + p_dot_min
+				i += 1
+
+		return i, x[self.q_index:self.b_index]
+
+
 	def ln_prior_q_hist(self,p):
+
+		pnode = p[:self.n_q_hist_bins]
+		pnode_dot = p[self.n_q_hist_bins:2*self.n_q_hist_bins]
+
+
+		#pq4, pq3, pq2, pq1, pq4_dot, pq3_dot, pq2_dot, pq1_dot = p
+
+		x = self.default_params.copy()
+		N = self.n_q_hist_bins
+		delta_q = 1.0/N
+
+		#pnode[0] = N - np.sum(pnode[1:])
+
+		pmax = 100*N
+		for j in range(N):
+			if pnode[j] < 0.0:
+				return -1.e6*pnode[j]**2
+			if pnode[j] > pmax:
+				return self.neginf
+
+		if np.sum(self.freeze[self.q_index+self.n_q_hist_bins:self.q_index+2*self.n_q_hist_bins]) < N:
+			for j in range(N):
+				# pq j _dot
+				pmax = np.min([2,1.0/delta_q - np.sum(x[self.q_index+j:self.q_index+N])])
+				p_dot_min = np.max([-(pmax-pnode[j])/self.delta_M,(0.0 - pnode[j])/self.delta_M])
+				p_dot_max = np.min([-(0.0-pnode[j])/self.delta_M,(pmax - pnode[j])/self.delta_M])
+				if pnode_dot[j] < p_dot_min  or pnode_dot[j]> p_dot_max:
+					return self.neginf
+
+		return N*np.log(N) + (N-2)*np.sum(np.log(1.0-pnode/N))
+
+
+	def ln_prior_q_hist_old(self,p):
 
 		pq4, pq3, pq2, pq1, pq4_dot, pq3_dot, pq2_dot, pq1_dot = p
 
 		delta_q = 1.0/5.0
-		pmax = 1.0/delta_q
+		#pmax = 1.0/delta_q
+		pmax = 2.0
 		if pq4 < 0.0 or pq4 > pmax:
 			return self.neginf
 		delta_q = 1.0/5.0
-		pmax = 1.0/delta_q - pq4 
+		pmax = np.min([2.0,1.0/delta_q - pq4]) 
 		if pq3 < 0.0 or pq3 > pmax:
 			return self.neginf
-		pmax = 1.0/delta_q - pq4 - pq3
+		pmax = np.min([2.0,1.0/delta_q - pq4 - pq3])
 		if pq2 < 0.0 or pq2 > pmax:
 			return self.neginf
-		pmax = 1.0/delta_q - pq4 - pq3 -pq2
+		pmax = np.min([2.0,1.0/delta_q - pq4 - pq3 -pq2])
 		if pq1 < 0.0 or pq1 > pmax:
 			return self.neginf
 
-		pmax = 1.0/delta_q
+		#pmax = 1.0/delta_q
+		pmax = 2.0
 		p_dot_min = np.max([-(pmax-pq1)/self.delta_M,(0.0 - pq1)/self.delta_M])
 		p_dot_max = np.min([-(0.0-pq1)/self.delta_M,(pmax - pq1)/self.delta_M])
 		if pq4_dot < p_dot_min  or pq4_dot > p_dot_max:
 			return self.neginf
-		pmax = 1.0/delta_q - pq4 
+		pmax = np.min([2.0,1.0/delta_q - pq4]) 
 		p_dot_min = np.max([-(pmax-pq1)/self.delta_M,(0.0 - pq1)/self.delta_M])
 		p_dot_max = np.min([-(0.0-pq1)/self.delta_M,(pmax - pq1)/self.delta_M])
 		if pq3_dot < p_dot_min  or pq3_dot > p_dot_max:
 			return self.neginf
-		pmax = 1.0/delta_q - pq4 - pq3
+		pmax = np.min([2.0,1.0/delta_q - pq4 - pq3])
 		p_dot_min = np.max([-(pmax-pq1)/self.delta_M,(0.0 - pq1)/self.delta_M])
 		p_dot_max = np.min([-(0.0-pq1)/self.delta_M,(pmax - pq1)/self.delta_M])
 		if pq2_dot < p_dot_min  or pq2_dot > p_dot_max:
 			return self.neginf
-		pmax = 1.0/delta_q - pq4 -pq3 - pq2
+		pmax = np.min([2.0,1.0/delta_q - pq4 - pq3 -pq2])
 		p_dot_min = np.max([-(pmax-pq1)/self.delta_M,(0.0 - pq1)/self.delta_M])
 		p_dot_max = np.min([-(0.0-pq1)/self.delta_M,(pmax - pq1)/self.delta_M])
 		if pq1_dot < p_dot_min  or pq1_dot > p_dot_max:
@@ -1744,24 +1908,24 @@ class CMDFitter():
 
 	def prior_transform_general(self,u,i):
 
-		# params are fb0, fb1, ft, oc, om, ocv, omv, ocov, f_o, log h0, h1
+		# params are fb0, fb1, ft, oc, om, ocv, omv, ocov, f_o, logh, hdot
 
 		x = self.default_params.copy()
 
 		if not self.freeze[self.b_index]:
 			# fB0
-			x[self.b_index] = (0.93-self.scale_fo)*u[i] + 0.02
+			x[self.b_index] = (0.93)*u[i] + 0.02
 			i += 1
 		if not self.freeze[self.b_index+1]:
 			# fB1
-			fb1min = np.max([-0.1/self.delta_M,-(0.95 - self.scale_fo - x[self.b_index])/self.delta_M,(0.02 - x[self.b_index])/self.delta_M])
-			fb1max = np.min([0.1/self.delta_M,-(0.02 - x[self.b_index])/self.delta_M,(0.95 - self.scale_fo - x[self.b_index])/self.delta_M])
+			fb1min = np.max([-0.1/self.delta_M,-(0.95  - x[self.b_index])/self.delta_M,(0.02 - x[self.b_index])/self.delta_M])
+			fb1max = np.min([0.1/self.delta_M,-(0.02 - x[self.b_index])/self.delta_M,(0.95  - x[self.b_index])/self.delta_M])
 			x[self.b_index+1] = (fb1max-fb1min)*u[i] + fb1min
 			#x[self.b_index+1] = truncnorm.ppf(u[i], fb1min/0.1, fb1max/0.1, loc=0.0, scale=0.1)
 			i += 1
 		if not self.freeze[self.b_index+2]:
 			# ft
-			x[self.b_index+2] = (1.0-x[self.b_index]-self.scale_fo)*u[i] + 0.00
+			x[self.b_index+2] = (1.0-x[self.b_index])*u[i] + 0.00
 			i += 1
 
 		if not self.freeze[self.b_index+3]:
@@ -1791,13 +1955,14 @@ class CMDFitter():
 			i += 1
 
 		if not self.freeze[self.b_index+9]:
-			# log h0
+			# log h
 			#logh = truncnorm.ppf(u[i], -0.3/0.2, 1.0/0.1, loc=0.0, scale=0.1)
-			logh = 1.06*u[i] - 0.06 
-			x[self.b_index+9] = 10.0**logh
+			#logh = 1.06*u[i] - 0.06 
+			#x[self.b_index+9] = 10.0**logh
+			x[self.b_index+9] = 1.06*u[i] - 0.06 
 			i += 1
 		if not self.freeze[self.b_index+10]:
-			# h1
+			# hdot
 			scale = 0.4*x[self.b_index+9]/self.delta_M
 			#x[self.b_index+5] = truncnorm.ppf(u[i], 0.0, 2.0*x[self.b_index+4]/scale, loc=0.0, scale=scale)
 			x[self.b_index+10] = u[i]*2.0*scale
@@ -1808,19 +1973,18 @@ class CMDFitter():
 
 	def ln_prior_q_general(self,p):
 
-		fb0, fb1, ft, oc, om, ocv, omv, ocov, fo, h0, h1 = p
+		fb0, fb1, ft, oc, om, ocv, omv, ocov, fo, logh, hdot = p
 
-		fb1min = np.max([-0.1/self.delta_M,-(0.95 - self.scale_fo - fb0)/self.delta_M,(0.02 - fb0)/self.delta_M])
-		fb1max = np.min([0.1/self.delta_M,-(0.02 - fb0)/self.delta_M,(0.95 - self.scale_fo - fb0)/self.delta_M])
-		log_h = np.log10(h0)
+		fb1min = np.max([-0.1/self.delta_M,-(0.95 - fb0)/self.delta_M,(0.02 - fb0)/self.delta_M])
+		fb1max = np.min([0.1/self.delta_M,-(0.02 - fb0)/self.delta_M,(0.95  - fb0)/self.delta_M])
 
 		if oc < self.outlier_description[0] - 0.3 or oc > self.outlier_description[0] + 0.3 or om < self.outlier_description[1] - 3 or \
 				om > self.outlier_description[1] + 3 or ocv < 0 or ocv > 9*self.outlier_description[2] or omv < 0 or omv > 9*self.outlier_description[3] or \
 				ocov < 0 or ocov > 9*self.outlier_description[4]:
 			return self.neginf
 
-		if fb0 < 0.02 or fb0 > 0.95 - self.scale_fo  or fb1 < fb1min or fb1 > fb1max or ft < 0.0 or ft > 1.0-fb0-2*self.scale_fo or \
-				fo < 0 or fo > self.scale_fo or log_h < -0.06 or log_h > 1.0 or h1 < 0.0 or h1 > 2.0*0.4*h0/self.delta_M:
+		if fb0 < 0.02 or fb0 > 0.95   or fb1 < fb1min or fb1 > fb1max or ft < 0.0 or ft > 1.0-fb0 or \
+				fo < 0 or fo > self.scale_fo or logh < -0.06 or logh > 1.0 or hdot < 0.0 or hdot > 2.0*0.4*10**logh/self.delta_M:
 			return self.neginf 
 
 		return 0.0
@@ -1912,7 +2076,7 @@ class CMDFitter():
 		if not np.isfinite(lp):
 			return self.neginf
 
-		lnp = self.lnlikelihood(params)
+		lnp, _  = self.lnlikelihood(params)
 
 		if not np.isfinite(lnp):
 			return self.neginf
@@ -1943,6 +2107,8 @@ class CMDFitter():
 		labels = [self.labels[i] for i in range(self.ndim) if self.freeze[i] == 0]
 
 		# Set the initial state for the walkers to be a tight distribution around the guess
+		print('self.emcee_walker_dispersion.shape',self.emcee_walker_dispersion.shape)
+		print('np.random.randn(ndim).shape',np.random.randn(ndim).shape)
 		state = [params_guess[self.freeze==0] + self.emcee_walker_dispersion*np.random.randn(ndim) for i in range(n_walkers)]
 
 		# Run the sampler    
@@ -1993,11 +2159,18 @@ class CMDFitter():
 		plt.savefig(prefix+'corner.png')
 
 
-	def dynesty_sample(self,prefix='dy_',jitter=False,bound='multi',sample='rwalk',nlive=2000):
+	def dynesty_sample(self,prefix='dy_',jitter=False,bound='multi',sample='rwalk',nlive=500,n_parallel=1):
 
 		from dynesty import NestedSampler, DynamicNestedSampler
 		from dynesty import plotting as dyplot
 		from dynesty import utils as dyfunc
+		from dynesty.pool import Pool
+
+		# import dill
+		# dyfunc.pickle_module = dill
+		
+		assert n_parallel == 1, "Parallel processing not implemented yet."
+
 
 		self.prefix = prefix
 
@@ -2006,11 +2179,25 @@ class CMDFitter():
 
 		labels = [self.labels[i] for i in range(self.ndim) if self.freeze[i] == 0]
 
-		#sampler = NestedSampler(self.lnlikelihood, self.prior_transform, ndim, bound=bound,sample=sample,nlive=nlive)
-		sampler = DynamicNestedSampler(self.lnlikelihood, self.prior_transform, ndim, bound=bound,sample=sample)
 
+		if n_parallel == 1:
 
-		sampler.run_nested()
+			#sampler = NestedSampler(self.lnlikelihood, self.prior_transform, ndim, bound=bound,sample=sample,nlive=nlive)
+			sampler = DynamicNestedSampler(self.lnlikelihood, self.prior_transform, ndim, bound=bound, sample=sample, blob=True)
+			sampler.run_nested(nlive_init=nlive,dlogz_init=0.01)
+			res = sampler.results
+			print(res)
+			#sampler.run_nested(use_stop=False,wt_kwargs={'pfrac': 1.0})
+
+		else:
+
+			import multiprocessing
+			multiprocessing.set_start_method('spawn')
+			with Pool(n_parallel, self.lnlikelihood, self.prior_transform) as pool:
+				print(pool.__dir__())
+				sampler = DynamicNestedSampler(pool.loglike, pool.prior_transform, ndim, pool=pool, bound=bound, sample=sample, blob=True)
+				sampler.run_nested(nlive_init=nlive)
+
 
 		res = sampler.results
 
@@ -2019,6 +2206,7 @@ class CMDFitter():
 
 		np.save(prefix+'samples.npy',samples)
 		np.save(prefix+'weights.npy',weights)
+		np.save(prefix+'samples_lnl.npy',res['blob'])
 
 		res.summary()
 
@@ -2037,7 +2225,6 @@ class CMDFitter():
 			print('dyplot.traceplot failed')
 			pass
 
-
 		try:
 			fig, axes = plt.subplots(ndim, ndim, figsize=(15, 15))
 			axes = axes.reshape((ndim, ndim))  # reshape axes
@@ -2046,6 +2233,15 @@ class CMDFitter():
 			plt.savefig(prefix+'corner.png')
 		except:
 			print('dyplot.cornerplot failed')
+			pass
+
+		try:
+			fig, axes = plt.subplots(ndim, ndim, figsize=(15, 15))
+			axes = axes.reshape((ndim, ndim))  # reshape axes
+			fg, ax = dyplot.cornerpoints(res, cmap='viridis',kde=False,max_n_ticks=3,labels=labels,fig=(fig,axes))
+			plt.savefig(prefix+'cornerpts.png')
+		except:
+			print('dyplot.cornerpoints failed')
 			pass
 
 		if jitter:
@@ -2061,7 +2257,7 @@ class CMDFitter():
 
 
 
-	def ultranest_sample(self,prefix='un_',stepsampler=False):
+	def ultranest_sample(self,prefix='un_',stepsampler=True):
 
 		import ultranest
 		import ultranest.stepsampler
