@@ -36,11 +36,11 @@ likelihood_functions = SourceModule("""
 //
 // cov should be a [n,2,2] array, where n is the number of data points
 //
-texture<float, 2> data;
-texture<float, 2> cov;
+//texture<float, 2> data;
+//texture<float, 2> cov;
 
 
-texture<float, 2> DMQ, SMQ;
+//texture<float, 2> DMQ, SMQ;
 
 extern "C" {
 
@@ -163,7 +163,7 @@ __device__ double outlier_likelihood(double *info, double *Dk, double f_outlier)
 }
 
 
-__device__ void single_likelihood(int htype, double h, double *Dk, double Sk[2][2], double *PM, double *result){
+__device__ void single_likelihood(double *DMQ, double *SMQ, int htype, double h, double *Dk, double Sk[2][2], double *PM, double *result){
 	
 	int nMB = 50;
 
@@ -177,14 +177,14 @@ __device__ void single_likelihood(int htype, double h, double *Dk, double Sk[2][
 
 	    for (int i = threadIdx.x; i<nMB; i+= blockDim.x){
 
-		    D[0] = Dk[0] - tex2D(DMQ,i,0);
-	    	D[1] = Dk[1] - tex2D(DMQ,i,1);
+		    D[0] = Dk[0] - DMQ[2*i];
+	    	D[1] = Dk[1] - DMQ[2*i+1];
 
-			S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
+			S[0][0] = h*h*Sk[0][0] + SMQ[4*i];
 
-			S[0][1] = h*h*Sk[0][1] + tex2D(SMQ,i,1);
-			S[1][0] = h*h*Sk[1][0] + tex2D(SMQ,i,2);
-			S[1][1] = h*h*Sk[1][1] + tex2D(SMQ,i,3);
+			S[0][1] = h*h*Sk[0][1] + SMQ[4*i+1];
+			S[1][0] = h*h*Sk[1][0] + SMQ[4*i+2];
+			S[1][1] = h*h*Sk[1][1] + SMQ[4*i+3];
 
 		    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
 
@@ -198,10 +198,10 @@ __device__ void single_likelihood(int htype, double h, double *Dk, double Sk[2][
 			lnp[threadIdx.x] = logaddexp(lnp[threadIdx.x],-0.5*DSD + log(PM[i]) - 0.5*log(detS) - log(2.0*M_PI));
 
 
-			//printf("k, i, Dk, DMQ, D0, Sk, DSD, lnp: %d %d %f  %f %f %f %f %f %f %f %f %f %f %f\\n",blockIdx.x,i,Dk[0],Dk[1],tex2D(DMQ,i,0),tex2D(DMQ,i,1),D[0], D[1], Sk[0][0], Sk[0][1],Sk[1][0],Sk[1][1],DSD, lnp[threadIdx.x]);
+			//printf("k, i, Dk, DMQ, D0, Sk, DSD, lnp: %d %d %f  %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f\\n",blockIdx.x,i,Dk[0],Dk[1],DMQ[2*i,0],DMQ[2*i,1],D[0], D[1], Sk[0][0], Sk[0][1],Sk[1][0],Sk[1][1],DSD, PM[i], -0.5*DSD + log(PM[i]) - 0.5*log(detS) - log(2.0*M_PI), -0.5*DSD, log(PM[i]), -0.5*log(detS), -log(2.0*M_PI), detS, lnp[threadIdx.x]);
 			//printf("i, Dk, DMQ, D0, DSD, lnp: %d %f  %f %f %f %f %f %f %f\\n",blockIdx.x,i,Dk[0],Dk[1],tex2D(DMQ,i,0),tex2D(DMQ,i,1),D[0], D[1], DSD, lnp[threadIdx.x]);
 			//printf("i, DMQ: %d, %f %f \\n",i,tex2D(DMQ,i,0),tex2D(DMQ,i,1));
-			//printf("i, SMQ: %d %f %f \\n",i, tex2D(SMQ,i,0),tex2D(SMQ,i,1),tex2D(SMQ,i,2),tex2D(SMQ,i,3));
+			//printf("i, SMQ: %d %f %f %f %f\\n",i, SMQ[4*i],SMQ[4*i+1],SMQ[4*i+2],SMQ[4*i+3]);
 
 		}
 
@@ -209,14 +209,14 @@ __device__ void single_likelihood(int htype, double h, double *Dk, double Sk[2][
 
 	    for (int i = threadIdx.x; i<nMB; i+= blockDim.x){
 
-		    D[0] = Dk[0] - tex2D(DMQ,i,0);
-	    	D[1] = Dk[1] - tex2D(DMQ,i,1);
+		    D[0] = Dk[0] - DMQ[2*i];
+	    	D[1] = Dk[1] - DMQ[2*i+1];
 
-			S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
+			S[0][0] = h*h*Sk[0][0] + SMQ[4*i];
 
-			S[0][1] = Sk[0][1] + tex2D(SMQ,i,1);
-			S[1][0] = Sk[1][0] + tex2D(SMQ,i,2);
-			S[1][1] = Sk[1][1] + tex2D(SMQ,i,3);		
+			S[0][1] = Sk[0][1] + SMQ[4*i+1];
+			S[1][0] = Sk[1][0] + SMQ[4*i+2];
+			S[1][1] = Sk[1][1] + SMQ[4*i+3];
 
 		    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
 
@@ -256,7 +256,7 @@ __device__ void single_likelihood(int htype, double h, double *Dk, double Sk[2][
 
 
 
-__device__ void binary_likelihood(int htype, double h, double *Dk, double Sk[2][2], double *PMQ, double *result){
+__device__ void binary_likelihood(double *DMQ, double *SMQ, int htype, double h, double *Dk, double Sk[2][2], double *PMQ, double *result){
 	
 	int nMB = 50;
 	int nQB = 50;
@@ -271,13 +271,14 @@ __device__ void binary_likelihood(int htype, double h, double *Dk, double Sk[2][
 
 	    for (int i = threadIdx.x; i<nMB*nQB; i+= blockDim.x){
 
-		    D[0] = Dk[0] - tex2D(DMQ,i,0);
-	    	D[1] = Dk[1] - tex2D(DMQ,i,1);
+		    D[0] = Dk[0] - DMQ[2*i];
+	    	D[1] = Dk[1] - DMQ[2*i+1];
 
-			S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
-			S[0][1] = h*h*Sk[0][1] + tex2D(SMQ,i,1);
-			S[1][0] = h*h*Sk[1][0] + tex2D(SMQ,i,2);
-			S[1][1] = h*h*Sk[1][1] + tex2D(SMQ,i,3);
+			S[0][0] = h*h*Sk[0][0] + SMQ[4*i];
+
+			S[0][1] = h*h*Sk[0][1] + SMQ[4*i+1];
+			S[1][0] = h*h*Sk[1][0] + SMQ[4*i+2];
+			S[1][1] = h*h*Sk[1][1] + SMQ[4*i+3];
 
 		    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
 
@@ -296,14 +297,14 @@ __device__ void binary_likelihood(int htype, double h, double *Dk, double Sk[2][
 
 	    for (int i = threadIdx.x; i<nMB*nQB; i+= blockDim.x){
 
-		    D[0] = Dk[0] - tex2D(DMQ,i,0);
-	    	D[1] = Dk[1] - tex2D(DMQ,i,1);
+		    D[0] = Dk[0] - DMQ[2*i];
+	    	D[1] = Dk[1] - DMQ[2*i+1];
 
-			S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
+			S[0][0] = h*h*Sk[0][0] + SMQ[4*i];
 
-			S[0][1] = Sk[0][1] + tex2D(SMQ,i,1);
-			S[1][0] = Sk[1][0] + tex2D(SMQ,i,2);
-			S[1][1] = Sk[1][1] + tex2D(SMQ,i,3);
+			S[0][1] = Sk[0][1] + SMQ[4*i+1];
+			S[1][0] = Sk[1][0] + SMQ[4*i+2];
+			S[1][1] = Sk[1][1] + SMQ[4*i+3];
 
 		    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
 
@@ -338,7 +339,7 @@ __device__ void binary_likelihood(int htype, double h, double *Dk, double Sk[2][
 
 
 
-__device__ void triple_likelihood(int htype, double h, double *Dk, double Sk[2][2], double *PMQ, double *result){
+__device__ void triple_likelihood(double *DMQ, double *SMQ, int htype, double h, double *Dk, double Sk[2][2], double *PMQ, double *result){
 	
 	int nMB = 50;
 	int nQB = 50;
@@ -353,14 +354,14 @@ __device__ void triple_likelihood(int htype, double h, double *Dk, double Sk[2][
 
 	    for (int i = threadIdx.x; i<nMB*nQB*nQB; i+= blockDim.x){
 
-		    D[0] = Dk[0] - tex2D(DMQ,i,0);
-	    	D[1] = Dk[1] - tex2D(DMQ,i,1);
+		    D[0] = Dk[0] - DMQ[2*i];
+	    	D[1] = Dk[1] - DMQ[2*i+1];
 
-			S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
+			S[0][0] = h*h*Sk[0][0] + SMQ[4*i];
 
-			S[0][1] = h*h*Sk[0][1] + tex2D(SMQ,i,1);
-			S[1][0] = h*h*Sk[1][0] + tex2D(SMQ,i,2);
-			S[1][1] = h*h*Sk[1][1] + tex2D(SMQ,i,3);
+			S[0][1] = h*h*Sk[0][1] + SMQ[4*i+1];
+			S[1][0] = h*h*Sk[1][0] + SMQ[4*i+2];
+			S[1][1] = h*h*Sk[1][1] + SMQ[4*i+3];
 
 		    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
 
@@ -379,14 +380,14 @@ __device__ void triple_likelihood(int htype, double h, double *Dk, double Sk[2][
 
 	    for (int i = threadIdx.x; i<nMB*nQB*nQB; i+= blockDim.x){
 
-		    D[0] = Dk[0] - tex2D(DMQ,i,0);
-	    	D[1] = Dk[1] - tex2D(DMQ,i,1);
+		    D[0] = Dk[0] - DMQ[2*i];
+	    	D[1] = Dk[1] - DMQ[2*i+1];
 
-			S[0][0] = h*h*Sk[0][0] + tex2D(SMQ,i,0);
+			S[0][0] = h*h*Sk[0][0] + SMQ[4*i];
 
-			S[0][1] = Sk[0][1] + tex2D(SMQ,i,1);
-			S[1][0] = Sk[1][0] + tex2D(SMQ,i,2);
-			S[1][1] = Sk[1][1] + tex2D(SMQ,i,3);
+			S[0][1] = Sk[0][1] + SMQ[4*i+1];
+			S[1][0] = Sk[1][0] + SMQ[4*i+2];
+			S[1][1] = Sk[1][1] + SMQ[4*i+3];
 
 		    detS = S[0][0]*S[1][1] - S[0][1]*S[0][1];
 
@@ -421,7 +422,7 @@ __device__ void triple_likelihood(int htype, double h, double *Dk, double Sk[2][
 
 
 
-__global__ void likelihood(double *PM_single, double *PMQ_binary, double *PMQ_triple, double *outlier_info, int htype, int mtype, double h0, double h1, double h_magnitude_ref, double f_outlier, double *lnp_k){
+__global__ void likelihood(double *DMQ, double *SMQ, double *data, double *cov, double *PM_single, double *PMQ_binary, double *PMQ_triple, double *outlier_info, int htype, int mtype, double logh, double h1, double h_magnitude_ref, double f_outlier, double *lnp_k){
 
 
 	int k = blockIdx.x;
@@ -430,15 +431,16 @@ __global__ void likelihood(double *PM_single, double *PMQ_binary, double *PMQ_tr
 
 	double Sk[2][2], Dk[2];
 
-	Dk[0] = tex2D(data,k,0);
-    Dk[1] = tex2D(data,k,1);
+	Dk[0] = data[2*k];
+    Dk[1] = data[2*k+1];
 
-    Sk[0][0] = tex2D(cov,k,0);
-    Sk[0][1] = tex2D(cov,k,1);
-    Sk[1][0] = tex2D(cov,k,2);
-    Sk[1][1] = tex2D(cov,k,3);
 
-	double h = h0 + h1*(Dk[1] - h_magnitude_ref);
+    Sk[0][0] = cov[4*k];
+    Sk[0][1] = cov[4*k+1];
+    Sk[1][0] = cov[4*k+2];
+    Sk[1][1] = cov[4*k+3];
+
+	double h = pow(10.0,logh) + h1*(Dk[1] - h_magnitude_ref);
 
 	double l_outlier = 0.0;
     if (threadIdx.x == 0) {
@@ -448,18 +450,18 @@ __global__ void likelihood(double *PM_single, double *PMQ_binary, double *PMQ_tr
 	__syncthreads();
 
 	double l_single = 0.0;
-	single_likelihood(htype, h, Dk, Sk, PM_single, &l_single);
+	single_likelihood(DMQ, SMQ, htype, h, Dk, Sk, PM_single, &l_single);
 
 	__syncthreads();
 
 	double l_binary;
-	binary_likelihood(htype, h, Dk, Sk, PMQ_binary, &l_binary);
+	binary_likelihood(DMQ, SMQ, htype, h, Dk, Sk, PMQ_binary, &l_binary);
 
 	__syncthreads();
 
 	double l_triple;
 	if (mtype == 1) {
-		triple_likelihood(htype, h, Dk, Sk, PMQ_triple, &l_triple);
+		triple_likelihood(DMQ, SMQ, htype, h, Dk, Sk, PMQ_triple, &l_triple);
 	}
 
 	__syncthreads();
@@ -475,6 +477,10 @@ __global__ void likelihood(double *PM_single, double *PMQ_binary, double *PMQ_tr
 			lnp_k[k+4*gridDim.x] = l_triple;
 		}
 		//printf("%d %f %f %f %f %f %f %f\\n",k,Dk[0], Dk[1], l_single,l_binary,l_triple,l_outlier,lnp_k[k]);
+ 	   //printf("DK %d %f %f\\n",k,Dk[0],Dk[1]);
+ 	   //printf("DMQ %f %f\\n",DMQ[0],DMQ[1]);
+ 	   //printf("SMQ %f %f %f %f\\n",SMQ[0],SMQ[1],SMQ[2],SMQ[3]);
+ 	   //printf("cov %f %f %f %f\\n",cov[0],cov[1],cov[2],cov[3]);
 	}
 
  	__syncthreads();

@@ -66,8 +66,10 @@ class Data():
 		self.magnitude_label = data_dict['magnitude_label']
 
 
-		self.trim_left = 0.05
-		self.trim_right = 0.15
+		# self.trim_left = 0.05
+		# self.trim_right = 0.15
+		self.trim_left = 0.25
+		self.trim_right = 0.35
 		if 'trim_left' in data_dict:
 			self.trim_left = data_dict['trim_left']
 		if 'trim_right' in data_dict:
@@ -118,16 +120,26 @@ class Data():
 		"""Upload data to GPU texture memory."""
 
 
-		c_cov = self.cov.reshape((len(self.magnitude),4),order='F')
-		self.cov_CUDA = likelihood_functions.get_texref("cov")
-		drv.matrix_to_texref(np.float32(c_cov),self.cov_CUDA,order='F')
-		self.cov_CUDA.set_filter_mode(drv.filter_mode.POINT)
+		c_cov = self.cov.reshape((len(self.magnitude),4)).astype(np.float64)
 
-		col_mag = np.vstack((self.colour,self.magnitude))
+		self.c_cov_gpu = drv.mem_alloc(c_cov.nbytes)
+		drv.memcpy_htod(self.c_cov_gpu, c_cov)
 
-		self.col_mag_CUDA = likelihood_functions.get_texref("data")
-		drv.matrix_to_texref(np.float32(col_mag),self.col_mag_CUDA,order='C')
-		self.col_mag_CUDA.set_filter_mode(drv.filter_mode.POINT)
+
+		print("cov test",c_cov[0,:])
+
+		# self.cov_CUDA = likelihood_functions.get_texref("cov")
+		# drv.matrix_to_texref(np.float32(c_cov),self.cov_CUDA,order='F')
+		# self.cov_CUDA.set_filter_mode(drv.filter_mode.POINT)
+
+		col_mag = np.vstack((self.colour,self.magnitude)).reshape(len(self.colour),2,order='F').astype(np.float64)
+
+		self.col_mag_gpu = drv.mem_alloc(col_mag.nbytes)
+		drv.memcpy_htod(self.col_mag_gpu, col_mag)
+
+		# self.col_mag_CUDA = likelihood_functions.get_texref("data")
+		# drv.matrix_to_texref(np.float32(col_mag),self.col_mag_CUDA,order='C')
+		# self.col_mag_CUDA.set_filter_mode(drv.filter_mode.POINT)
 
 		return
 
@@ -170,18 +182,27 @@ class Data():
 		print('B_max_colour',B_max_colour)
 		print('k_max_flag',k_max_flag)
 		print('k_max',k_max)
+		print('trim_left',self.trim_left)
+		print('trim_right',self.trim_right)
 
 
 		B_min_interp = PchipInterpolator(np.flip(B_min_mag[k_min:]),np.flip(B_min_colour[k_min:]))
 		B_max_interp = PchipInterpolator(np.flip(B_max_mag[k_max:]),np.flip(B_max_colour[k_max:]))
 
+		# good_points = np.where( ( (self.magnitude > self.magnitude_min) & (self.magnitude < self.magnitude_max - 0.75) ) | \
+		# 						( (self.magnitude > self.magnitude_min - 0.75) & \
+		# 							(self.magnitude < self.magnitude_min) & \
+		# 							(self.colour > B_min_interp(self.magnitude) - 0.005 ) ) | \
+		# 						( (self.magnitude < self.magnitude_max) & \
+		# 							(self.magnitude > self.magnitude_max - 0.75) & \
+		# 							(self.colour < B_max_interp(self.magnitude) + 0.01 ) ) )[0]
 		good_points = np.where( ( (self.magnitude > self.magnitude_min) & (self.magnitude < self.magnitude_max - 0.75) ) | \
 								( (self.magnitude > self.magnitude_min - 0.75) & \
 									(self.magnitude < self.magnitude_min) & \
 									(self.colour > B_min_interp(self.magnitude) - 0.005 ) ) | \
 								( (self.magnitude < self.magnitude_max) & \
 									(self.magnitude > self.magnitude_max - 0.75) & \
-									(self.colour < B_max_interp(self.magnitude) + 0.01 ) ) )[0]
+									(self.colour < B_max_interp(self.magnitude) + 0.005 ) ) )[0]
 
 		if plot:
 
